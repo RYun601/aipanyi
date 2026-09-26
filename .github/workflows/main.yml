@@ -1,6 +1,13 @@
 name: Wails build
 
+# 触发条件刻意收得很紧，只允许两种：
+#   1) workflow_dispatch —— 在 Actions 页面手动点 "Run workflow"（日常自测、临时出包）
+#   2) push tag 且后缀为 -release / -dev / -pre（正式发版）
+# 明确【不】监听 push: branches，也【不】监听 pull_request。
+# 理由：三平台全量构建一轮约 15~20 分钟，"提交代码即构建" 既浪费额度也无意义。
+# 因此：普通 commit、普通 PR 都不会触发任何构建。
 on:
+  workflow_dispatch:
   push:
     tags:
     # Match any new tag
@@ -43,6 +50,18 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Compute build version
+        id: ver
+        shell: bash
+        run: |
+          # tag 触发：直接用 tag 名（如 v1.0.0-dev）
+          # 手动触发：退化成 dev-<short sha>，否则 main.Version 会被填成分支名 main
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "version=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=dev-$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Get commit message
         id: get_commit_message
         # 必须 shell: bash 统一平台行为（Windows 默认 pwsh 对引号/编码处理不同）；
@@ -53,8 +72,10 @@ jobs:
           MSG=$(git log -1 --pretty=format:'%s' | tr -d '"' | tr -d "'" | tr -d '\\')
           echo "commit_message=$MSG" >> $GITHUB_OUTPUT
 
+      # 仅 tag 触发才需要判断发布渠道；手动触发时直接跳过
       - name: Determine release channel
         id: channel
+        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
           TAG="${{ github.ref_name }}"
@@ -96,7 +117,7 @@ jobs:
           set -euo pipefail
           # 每个 -X 值用单引号包裹：commit message / 声明文案可能含空格，
           # 不包裹会被 ldflags 按空格切碎（历史上正是因此导致 macOS 构建失败）
-          LDFLAGS="-X 'main.Version=${{ github.ref_name }}' \
+          LDFLAGS="-X 'main.Version=${{ steps.ver.outputs.version }}' \
           -X 'main.VersionCommit=${{ steps.get_commit_message.outputs.commit_message }}' \
           -X 'main.OFFICIAL_STATEMENT=${{ env.OFFICIAL_STATEMENT }}' \
           -X 'main.BuildKey=${{ env.BUILD_KEY }}'"
@@ -117,14 +138,28 @@ jobs:
           fi
           ls -lh dist-out
 
+      # 无论是否发版，产物一律上传为 run artifact（保留 14 天）。
+      # 手动触发时没有 Release 可传，靠这一步在 run 页面直接下载。
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.build.name }}
+          path: dist-out/*
+          if-no-files-found: error
+          retention-days: 14
+
+      # 只有 tag 触发才往 Release 上传。
+      # 注意：gh release upload 要求 Release 对象已存在，而 git push --tags 不会自动创建 Release，
+      # 所以发版顺序必须是「先在网页建好 Release -> 再推 tag」，否则这一步会失败。
       - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${{ github.ref_name }}" dist-out/* --clobber
 
       - name: Update release for channel
-        if: steps.channel.outputs.channel != 'release'
+        if: startsWith(github.ref, 'refs/tags/') && steps.channel.outputs.channel != 'release'
         uses: actions/github-script@v7
         with:
           script: |
