@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>AI盘译</title>
+    <link href="./src/style.css" rel="stylesheet">
+</head>
+<body>
+<div id="app"></div>
+<script>
+  // Web 模式（-tags web）：由 Go 服务端在响应时注入启动令牌，用于 /api 与 /ws 鉴权。
+  // 桌面模式（Wails）下该变量为空，桥接层自动走原生绑定，不受影响。
+  window.__AIPANYI_TOKEN__ = "__AIPANYI_TOKEN_VALUE__";
+</script>
+<script src="./src/main.js" type="module"></script>
+</body>
+</html>
+

@@ -1,0 +1,19 @@
+{
+  "name": "aipanyi",
+  "outputfilename": "aipanyi",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "http://localhost:5173",
+  "author": {
+    "name": "RYun601",
+    "email": ""
+  },
+  "info": {
+    "companyName": "RYun601",
+    "productName": "AI盘译",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright © RYun601. 基于 go-stock (GNU GPLv3) 修改。",
+    "comments": "股票行情实时获取，AI 赋能分析股票。支持 DeepSeek、OpenAI、Ollama、LMStudio、AnythingLLM、硅基流动、火山方舟、阿里云百炼等平台或模型。开源地址：https://github.com/RYun601/aipanyi"
+  }
+}

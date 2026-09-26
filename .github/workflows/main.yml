@@ -1,0 +1,163 @@
+name: Wails build
+
+on:
+  push:
+    tags:
+    # Match any new tag
+      - '*-release'
+      - '*-dev'
+      - '*-pre'
+
+env:
+  # Necessary for most environments as build failure can occur due to OOM issues
+  NODE_OPTIONS: "--max-old-space-size=4096"
+  OFFICIAL_STATEMENT: ${{ vars.OFFICIAL_STATEMENT }}
+  BUILD_KEY: ${{ vars.BUILD_KEY }}
+  # 构建产物名（不含扩展名），需与 backend/appinfo 的 Asset* 常量保持一致
+  APP_NAME: aipanyi
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+    # Failure in one platform build won't impact the others
+      fail-fast: false
+      matrix:
+        build:
+          - name: 'aipanyi-windows-amd64.exe'
+            platform:  'windows/amd64'
+            os: 'windows-latest'
+          - name: 'aipanyi-windows-arm64.exe'
+            platform:  'windows/arm64'
+            os: 'windows-latest'
+          - name: 'aipanyi-darwin-universal.zip'
+            platform: 'darwin/universal'
+            os: 'macos-latest'
+
+    runs-on: ${{ matrix.build.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Get commit message
+        id: get_commit_message
+        # 必须 shell: bash 统一平台行为（Windows 默认 pwsh 对引号/编码处理不同）；
+        # 清洗引号/反斜杠：值会被插入 bash 双引号串与 go -ldflags 单引号包裹，
+        # 引号字符会导致注入或破坏 ldflags 分词（含空格的中文 commit message 曾致 macOS 编译失败）
+        shell: bash
+        run: |
+          MSG=$(git log -1 --pretty=format:'%s' | tr -d '"' | tr -d "'" | tr -d '\\')
+          echo "commit_message=$MSG" >> $GITHUB_OUTPUT
+
+      - name: Determine release channel
+        id: channel
+        shell: bash
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [[ "$TAG" == *-release ]]; then
+            echo "channel=release" >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+            echo "channel_label=Release（稳定版）" >> $GITHUB_OUTPUT
+          elif [[ "$TAG" == *-pre ]]; then
+            echo "channel=pre" >> $GITHUB_OUTPUT
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+            echo "channel_label=Pre-release（预发布版）" >> $GITHUB_OUTPUT
+          elif [[ "$TAG" == *-dev ]]; then
+            echo "channel=dev" >> $GITHUB_OUTPUT
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+            echo "channel_label=Dev（开发版）" >> $GITHUB_OUTPUT
+          fi
+
+      # ---- 以下为原生构建步骤，替代原先的 ArvinLovegood/wails-build-action ----
+      # 原因：该 action 是上游作者仓库的 fork，CI 跑的是别人仓库里的代码；
+      # 且它自定义了 build-statement / build-key 两个非标准输入来注入 ldflags，
+      # 换成官方 action 会丢掉这两个变量。原生步骤可控且无供应链信任问题。
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.2'
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
+
+      - name: Build
+        id: build
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 每个 -X 值用单引号包裹：commit message / 声明文案可能含空格，
+          # 不包裹会被 ldflags 按空格切碎（历史上正是因此导致 macOS 构建失败）
+          LDFLAGS="-X 'main.Version=${{ github.ref_name }}' \
+          -X 'main.VersionCommit=${{ steps.get_commit_message.outputs.commit_message }}' \
+          -X 'main.OFFICIAL_STATEMENT=${{ env.OFFICIAL_STATEMENT }}' \
+          -X 'main.BuildKey=${{ env.BUILD_KEY }}'"
+          wails build -platform ${{ matrix.build.platform }} -ldflags "$LDFLAGS" -o ${{ env.APP_NAME }}
+
+      - name: Package assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-out
+          if [[ "${{ matrix.build.platform }}" == windows/* ]]; then
+            # Windows：wails 产物即 build/bin/<APP_NAME>.exe
+            cp "build/bin/${{ env.APP_NAME }}.exe" "dist-out/${{ matrix.build.name }}"
+          else
+            # macOS：把 .app 打成 zip（与 appinfo.AssetDarwin 命名对齐）
+            ( cd build/bin && zip -qr "${{ matrix.build.name }}" "${{ env.APP_NAME }}.app" )
+            mv "build/bin/${{ matrix.build.name }}" dist-out/
+          fi
+          ls -lh dist-out
+
+      - name: Upload to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" dist-out/* --clobber
+
+      - name: Update release for channel
+        if: steps.channel.outputs.channel != 'release'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const tag = '${{ github.ref_name }}';
+            const channel = '${{ steps.channel.outputs.channel }}';
+            const channelLabel = '${{ steps.channel.outputs.channel_label }}';
+            const prerelease = '${{ steps.channel.outputs.prerelease }}' === 'true';
+
+            const { data: releases } = await github.rest.repos.listReleases({ owner, repo });
+            const release = releases.find(r => r.tag_name === tag);
+
+            if (release) {
+              const updateParams = {
+                owner,
+                repo,
+                release_id: release.id,
+                prerelease: prerelease,
+                make_latest: 'false'
+              };
+
+              let channelNotice = '';
+              if (channel === 'dev') {
+                channelNotice = '\n\n---\n> ⚠️ **' + channelLabel + '** - 此版本为开发版，可能存在不稳定功能，仅供测试使用。';
+              } else if (channel === 'pre') {
+                channelNotice = '\n\n---\n> 🔄 **' + channelLabel + '** - 此版本为预发布版，欢迎体验新功能并反馈问题。';
+              }
+              if (channelNotice) {
+                updateParams.body = (release.body || '') + channelNotice;
+              }
+
+              await github.rest.repos.updateRelease(updateParams);
+              core.info(`Updated release ${tag}: prerelease=${prerelease}, channel=${channel}`);
+            } else {
+              core.warning(`Release not found for tag ${tag}`);
+            }
