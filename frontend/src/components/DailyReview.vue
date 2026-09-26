@@ -4,7 +4,7 @@ import {
   NButton, NCard, NDataTable, NDatePicker, NEmpty,
   NSelect, NSpace, NSpin, NTag, NTooltip, useMessage
 } from 'naive-ui'
-import {EventsOff, EventsOn} from '../../wailsjs/runtime'
+import {EventsOff, EventsOn} from '../../wailsjs/bridge'
 import {
   DeleteDailyReview, GenerateDailyReviewNow, GetAiConfigs, GetConfig,
   GetDailyReviewByDate, GetDailyReviewList, GetPromptTemplates

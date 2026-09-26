@@ -36,6 +36,7 @@ require (
 	github.com/go-resty/resty/v2 v2.17.2
 	github.com/go-toast/toast v0.0.0-20190211030409-01e6764cf0a4
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/inconshreveable/go-update v0.0.0-20160112193335-8152e7eb6ccf
 	github.com/larksuite/oapi-sdk-go/v3 v3.11.0
 	github.com/lib4u/fake-useragent v1.0.6
@@ -125,7 +126,6 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.16 // indirect
 	github.com/googleapis/gax-go/v2 v2.22.0 // indirect
 	github.com/goph/emperror v0.17.2 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/jackmordaunt/icns/v3 v3.0.1 // indirect
 	github.com/jchv/go-winloader v0.0.0-20250406163304-c1995be93bd1 // indirect
@@ -218,4 +218,3 @@ require (
 
 // v1.38.0 does not compile against invopop/jsonschema v0.14 (mixes wk8 vs pb33f ordered-map in schemautil.go).
 exclude github.com/anthropics/anthropic-sdk-go v1.38.0
-

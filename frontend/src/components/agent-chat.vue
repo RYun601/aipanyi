@@ -142,7 +142,7 @@ const icon = ref('') // 由 GetVersionInfo().icon 注入本地内嵌图标，不
 import {darkTheme, NFlex, NImage,NSelect} from "naive-ui";
 import {ChatWithAgent, GetAiConfigs, GetConfig, GetVersionInfo, SubmitAgentFeedback} from "../../wailsjs/go/main/App";
 import {models} from '../../wailsjs/go/models';
-import {EventsOff, EventsOn} from '../../wailsjs/runtime'
+import {EventsOff, EventsOn} from '../../wailsjs/bridge'
 import 'tdesign-vue-next/es/style/index.css';
 
 

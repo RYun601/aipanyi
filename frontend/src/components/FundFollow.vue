@@ -13,7 +13,7 @@ import {
   GetFundHistoryNetValue,
   GetFundTop10Holdings
 } from "../../wailsjs/go/main/App";
-import {Environment} from "../../wailsjs/runtime";
+import {Environment} from "../../wailsjs/bridge";
 import vueDanmaku from 'vue3-danmaku'
 import FundKlineChart from "./FundKlineChart.vue";
 import StockLightweightKlineChart from "./StockLightweightKlineChart.vue";

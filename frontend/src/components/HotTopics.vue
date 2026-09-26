@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import {onBeforeMount, onUnmounted, ref} from 'vue'
 import {HotTopic, OpenURL} from "../../wailsjs/go/main/App";
-import {Environment} from "../../wailsjs/runtime";
+import {Environment} from "../../wailsjs/bridge";
 const list  = ref([])
 const task =ref()
 

@@ -13,7 +13,7 @@ import sparkLine from "./stockSparkLine.vue"
 import klineChart from "./KLineChart.vue"
 import KLineChart from "./KLineChart.vue";
 import StockLightweightKlineChart from "./StockLightweightKlineChart.vue";
-import { EventsEmit } from "../../wailsjs/runtime";
+import { EventsEmit } from "../../wailsjs/bridge";
 import {FolderOpenOutline, AddOutline, DownloadOutline} from "@vicons/ionicons5";
 import {format} from "date-fns";
 

@@ -3,7 +3,7 @@ import { MdPreview } from 'md-editor-v3';
 import 'md-editor-v3/lib/preview.css';
 import {h, computed, nextTick, onBeforeUnmount, onMounted, ref} from 'vue';
 import {CheckUpdate, GetConfig, GetVersionInfo,GetUserManual,OpenURL,RestartAsAdmin} from "../../wailsjs/go/main/App";
-import {EventsOff, EventsOn,Environment} from "../../wailsjs/runtime";
+import {EventsOff, EventsOn,Environment} from "../../wailsjs/bridge";
 import {NAvatar, NButton, NTree, useNotification,NText} from "naive-ui";
 import { zhCN } from 'date-fns/locale';
 const updateLog = ref('');

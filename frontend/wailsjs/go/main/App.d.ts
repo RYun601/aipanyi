@@ -41,6 +41,8 @@ export function BatchDeleteAllStockInfo(arg1:Array<number>):Promise<string>;
 
 export function BuildKBGraph(arg1:string,arg2:number):Promise<void>;
 
+export function BuildTableXLSXBytes(arg1:string,arg2:data.ExportTableData):Promise<string>;
+
 export function CalculateNextRunTime(arg1:string):Promise<string>;
 
 export function CalculateNextRunTimes(arg1:string,arg2:number):Promise<Array<string>>;
@@ -144,6 +146,8 @@ export function EnableSkill(arg1:number,arg2:boolean):Promise<string>;
 export function ExecuteCronTaskNow(arg1:number):Promise<string>;
 
 export function ExportConfig():Promise<string>;
+
+export function ExportConfigData():Promise<string>;
 
 export function ExportTableToXLSX(arg1:string,arg2:data.ExportTableData):Promise<string>;
 
@@ -485,7 +489,11 @@ export function ImportSkillFromBase64(arg1:string):Promise<string>;
 
 export function ImportSkillPackage():Promise<string>;
 
+export function ImportSkillPackageFromPath(arg1:string):Promise<string>;
+
 export function ImportTradingRecordsFromExcel():Promise<data.TradingRecordImportResult>;
+
+export function ImportTradingRecordsFromPath(arg1:string):Promise<data.TradingRecordImportResult>;
 
 export function IndustryDetail(arg1:string):Promise<models.ConceptDetailInfo>;
 
@@ -532,6 +540,8 @@ export function ListRecommendBacktestByTemplate(arg1:number,arg2:number,arg3:num
 export function ListSkillFiles(arg1:string):Promise<Array<main.SkillFileInfo>>;
 
 export function LongTigerRank(arg1:string):Promise<any>;
+
+export function MarkdownContentForSave(arg1:string,arg2:string):Promise<string|string>;
 
 export function NewChatStream(arg1:string,arg2:string,arg3:string,arg4:number,arg5:any,arg6:boolean,arg7:boolean):Promise<void>;
 
@@ -641,8 +651,6 @@ export function SetTradingPrice(arg1:string,arg2:number,arg3:number,arg4:number,
 
 export function SetUserProfileEnabled(arg1:boolean):Promise<void>;
 
-
-
 export function ShowFromTray():Promise<void>;
 
 export function StartFeishuBot():Promise<string>;
@@ -664,6 +672,8 @@ export function TestDingDingNotice(arg1:string,arg2:string):Promise<string>;
 export function TestFeishuNotice(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function TestMCPServer(arg1:number):Promise<string>;
+
+export function TradingRecordTemplateBytes():Promise<string>;
 
 export function UnFollow(arg1:string):Promise<string>;
 

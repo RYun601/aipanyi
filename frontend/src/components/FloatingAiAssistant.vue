@@ -298,7 +298,7 @@ import {
   ImageOutline
 } from '@vicons/ionicons5'
 import { AbortSummaryStockNews, GetAiAssistantSession, GetAiConfigs, GetConfig, GetPromptTemplates, GetVersionInfo, SaveAiAssistantSession, SummaryStockNews } from '../../wailsjs/go/main/App'
-import { EventsOn, EventsOff } from '../../wailsjs/runtime'
+import { EventsOn, EventsOff } from '../../wailsjs/bridge'
 import { MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/preview.css'
 import html2canvas from 'html2canvas'

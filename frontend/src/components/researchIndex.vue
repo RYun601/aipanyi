@@ -16,7 +16,7 @@ import UplimitLadder from "./uplimitLadder.vue";
 import SelectStock from "./SelectStock.vue";
 import DailyOperationPlan from "./DailyOperationPlan.vue";
 import KnowledgeBaseManager from "./knowledge-base-manager.vue";
-import {EventsOff, EventsOn} from "../../wailsjs/runtime";
+import {EventsOff, EventsOn} from "../../wailsjs/bridge";
 import {useRoute} from 'vue-router'
 
 

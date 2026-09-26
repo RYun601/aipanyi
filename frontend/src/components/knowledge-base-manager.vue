@@ -764,7 +764,7 @@ import {
   GetConfig, SaveImage
 } from '../../wailsjs/go/main/App'
 import html2canvas from 'html2canvas'
-import { EventsOn, EventsOff } from '../../wailsjs/runtime'
+import { EventsOn, EventsOff } from '../../wailsjs/bridge'
 import { MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/preview.css'
 

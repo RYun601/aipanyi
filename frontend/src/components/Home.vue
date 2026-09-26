@@ -1,7 +1,7 @@
 <script setup>
 import {onBeforeMount, onBeforeUnmount, onMounted, ref, computed} from 'vue'
 import {GetConfig, GetTelegraphList, ReFleshTelegraphList} from "../../wailsjs/go/main/App";
-import {EventsOff, EventsOn} from "../../wailsjs/runtime";
+import {EventsOff, EventsOn} from "../../wailsjs/bridge";
 import {format} from 'date-fns';
 import {zhCN} from 'date-fns/locale';
 import AnalyzeMartket from "./AnalyzeMartket.vue";

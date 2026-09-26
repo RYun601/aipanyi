@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import {onBeforeMount, ref} from 'vue'
 import {LongTigerRank, GetLhbSeatDetail} from "../../wailsjs/go/main/App";
-import {BrowserOpenURL} from "../../wailsjs/runtime";
+import {BrowserOpenURL} from "../../wailsjs/bridge";
 import {ArrowDownOutline} from "@vicons/ionicons5";
 import _ from "lodash";
 import KLineChart from "./KLineChart.vue";
