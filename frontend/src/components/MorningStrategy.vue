@@ -5,7 +5,7 @@ import {
   NButton, NCard, NDataTable, NDatePicker, NEmpty,
   NSelect, NSpace, NSpin, NTag, NTooltip, useMessage
 } from 'naive-ui'
-import {EventsEmit, EventsOff, EventsOn} from '../../wailsjs/runtime'
+import {EventsEmit, EventsOff, EventsOn} from '../../wailsjs/bridge'
 import {
   DeleteMorningStrategy, GenerateMorningStrategyNow, GetAiConfigs, GetConfig,
   GetMorningStrategyByDate, GetMorningStrategyList, GetPromptTemplates

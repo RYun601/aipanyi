@@ -6,157 +6,293 @@
 |__/|__/\__,_/_/_/____/
 The electron alternative for Go
 (c) Lea Anthony 2019-present
-
--- AI盘译 双模式适配 -------------------------------------------------
-本文件在 Wails 原生实现之上包了一层桥接：
-  - EventsOn/EventsOff/EventsOnce 等事件 API 走 bridge.js（Web 模式下经 WebSocket）；
-  - 窗口类 API（Window*）在 Web 模式下退化为安全空操作，避免浏览器报错；
-  - 其余（日志、剪贴板等）保持原生行为。
---------------------------------------------------------------------
 */
 
-import { onEvent, offEvent, offAllEvents, openURL, environment, isWails } from '../bridge.js';
-
-/** Web 模式下窗口类 API 的空操作实现（保留调用链不中断）。 */
-const noopWindow = new Proxy({}, {
-  get: () => () => {
-    if (!isWails) return undefined;
-  },
-});
-
-function win() {
-  return isWails ? window.runtime : noopWindow;
-}
-
 export function LogPrint(message) {
-  if (isWails) window.runtime.LogPrint(message);
-  else console.log(message);
+    window.runtime.LogPrint(message);
 }
 
 export function LogTrace(message) {
-  if (isWails) window.runtime.LogTrace(message);
+    window.runtime.LogTrace(message);
 }
 
 export function LogDebug(message) {
-  if (isWails) window.runtime.LogDebug(message);
+    window.runtime.LogDebug(message);
 }
 
 export function LogInfo(message) {
-  if (isWails) window.runtime.LogInfo(message);
+    window.runtime.LogInfo(message);
 }
 
 export function LogWarning(message) {
-  if (isWails) window.runtime.LogWarning(message);
+    window.runtime.LogWarning(message);
 }
 
 export function LogError(message) {
-  if (isWails) window.runtime.LogError(message);
-  else console.error(message);
+    window.runtime.LogError(message);
 }
 
 export function LogFatal(message) {
-  if (isWails) window.runtime.LogFatal(message);
-  else console.error(message);
+    window.runtime.LogFatal(message);
 }
 
 export function EventsOnMultiple(eventName, callback, maxCallbacks) {
-  return onEvent(eventName, callback, maxCallbacks);
+    return window.runtime.EventsOnMultiple(eventName, callback, maxCallbacks);
 }
 
 export function EventsOn(eventName, callback) {
-  return EventsOnMultiple(eventName, callback, -1);
+    return EventsOnMultiple(eventName, callback, -1);
 }
 
 export function EventsOff(eventName, ...additionalEventNames) {
-  return offEvent(eventName, ...additionalEventNames);
+    return window.runtime.EventsOff(eventName, ...additionalEventNames);
 }
 
 export function EventsOffAll() {
-  return offAllEvents();
+  return window.runtime.EventsOffAll();
 }
 
 export function EventsOnce(eventName, callback) {
-  return EventsOnMultiple(eventName, callback, 1);
+    return EventsOnMultiple(eventName, callback, 1);
 }
 
-export function EventsEmit(eventName, ...data) {
-  if (!isWails) return; // Web 模式前端无上报通道，静默忽略
-  window.runtime.EventsEmit(eventName, ...data);
+export function EventsEmit(eventName) {
+    let args = [eventName].slice.call(arguments);
+    return window.runtime.EventsEmit.apply(null, args);
 }
 
-export function WindowReload() { return win().WindowReload(); }
-export function WindowReloadApp() { return win().WindowReloadApp(); }
-export function WindowSetAlwaysOnTop(b) { return win().WindowSetAlwaysOnTop(b); }
-export function WindowSetSystemDefaultTheme() { return win().WindowSetSystemDefaultTheme(); }
-export function WindowSetLightTheme() { return win().WindowSetLightTheme(); }
-export function WindowSetDarkTheme() { return win().WindowSetDarkTheme(); }
-export function WindowCenter() { return win().WindowCenter(); }
-export function WindowSetTitle(title) { if (isWails) window.runtime.WindowSetTitle(title); }
-export function WindowFullscreen() { return win().WindowFullscreen(); }
-export function WindowUnfullscreen() { return win().WindowUnfullscreen(); }
-export function WindowIsFullscreen() { return win().WindowIsFullscreen(); }
-export function WindowGetSize() { return win().WindowGetSize(); }
-export function WindowSetSize(width, height) { return win().WindowSetSize(width, height); }
-export function WindowSetMaxSize(width, height) { return win().WindowSetMaxSize(width, height); }
-export function WindowSetMinSize(width, height) { return win().WindowSetMinSize(width, height); }
-export function WindowSetPosition(x, y) { return win().WindowSetPosition(x, y); }
-export function WindowGetPosition() { return win().WindowGetPosition(); }
-export function WindowHide() { return win().WindowHide(); }
-export function WindowShow() { return win().WindowShow(); }
-export function WindowMaximise() { return win().WindowMaximise(); }
-export function WindowToggleMaximise() { return win().WindowToggleMaximise(); }
-export function WindowUnmaximise() { return win().WindowUnmaximise(); }
-export function WindowIsMaximised() { return win().WindowIsMaximised(); }
-export function WindowMinimise() { return win().WindowMinimise(); }
-export function WindowUnminimise() { return win().WindowUnminimise(); }
-export function WindowSetBackgroundColour(R, G, B, A) { return win().WindowSetBackgroundColour(R, G, B, A); }
-export function ScreenGetAll() { return win().ScreenGetAll(); }
-export function WindowIsMinimised() { return win().WindowIsMinimised(); }
-export function WindowIsNormal() { return win().WindowIsNormal(); }
+export function WindowReload() {
+    window.runtime.WindowReload();
+}
 
-export function BrowserOpenURL(url) { return openURL(url); }
-export function Environment() { return environment(); }
+export function WindowReloadApp() {
+    window.runtime.WindowReloadApp();
+}
 
-export function Quit() { if (isWails) window.runtime.Quit(); }
-export function Hide() { if (isWails) window.runtime.Hide(); }
-export function Show() { if (isWails) window.runtime.Show(); }
+export function WindowSetAlwaysOnTop(b) {
+    window.runtime.WindowSetAlwaysOnTop(b);
+}
+
+export function WindowSetSystemDefaultTheme() {
+    window.runtime.WindowSetSystemDefaultTheme();
+}
+
+export function WindowSetLightTheme() {
+    window.runtime.WindowSetLightTheme();
+}
+
+export function WindowSetDarkTheme() {
+    window.runtime.WindowSetDarkTheme();
+}
+
+export function WindowCenter() {
+    window.runtime.WindowCenter();
+}
+
+export function WindowSetTitle(title) {
+    window.runtime.WindowSetTitle(title);
+}
+
+export function WindowFullscreen() {
+    window.runtime.WindowFullscreen();
+}
+
+export function WindowUnfullscreen() {
+    window.runtime.WindowUnfullscreen();
+}
+
+export function WindowIsFullscreen() {
+    return window.runtime.WindowIsFullscreen();
+}
+
+export function WindowGetSize() {
+    return window.runtime.WindowGetSize();
+}
+
+export function WindowSetSize(width, height) {
+    window.runtime.WindowSetSize(width, height);
+}
+
+export function WindowSetMaxSize(width, height) {
+    window.runtime.WindowSetMaxSize(width, height);
+}
+
+export function WindowSetMinSize(width, height) {
+    window.runtime.WindowSetMinSize(width, height);
+}
+
+export function WindowSetPosition(x, y) {
+    window.runtime.WindowSetPosition(x, y);
+}
+
+export function WindowGetPosition() {
+    return window.runtime.WindowGetPosition();
+}
+
+export function WindowHide() {
+    window.runtime.WindowHide();
+}
+
+export function WindowShow() {
+    window.runtime.WindowShow();
+}
+
+export function WindowMaximise() {
+    window.runtime.WindowMaximise();
+}
+
+export function WindowToggleMaximise() {
+    window.runtime.WindowToggleMaximise();
+}
+
+export function WindowUnmaximise() {
+    window.runtime.WindowUnmaximise();
+}
+
+export function WindowIsMaximised() {
+    return window.runtime.WindowIsMaximised();
+}
+
+export function WindowMinimise() {
+    window.runtime.WindowMinimise();
+}
+
+export function WindowUnminimise() {
+    window.runtime.WindowUnminimise();
+}
+
+export function WindowSetBackgroundColour(R, G, B, A) {
+    window.runtime.WindowSetBackgroundColour(R, G, B, A);
+}
+
+export function ScreenGetAll() {
+    return window.runtime.ScreenGetAll();
+}
+
+export function WindowIsMinimised() {
+    return window.runtime.WindowIsMinimised();
+}
+
+export function WindowIsNormal() {
+    return window.runtime.WindowIsNormal();
+}
+
+export function BrowserOpenURL(url) {
+    window.runtime.BrowserOpenURL(url);
+}
+
+export function Environment() {
+    return window.runtime.Environment();
+}
+
+export function Quit() {
+    window.runtime.Quit();
+}
+
+export function Hide() {
+    window.runtime.Hide();
+}
+
+export function Show() {
+    window.runtime.Show();
+}
 
 export function ClipboardGetText() {
-  if (isWails) return window.runtime.ClipboardGetText();
-  return navigator.clipboard.readText();
+    return window.runtime.ClipboardGetText();
 }
 
 export function ClipboardSetText(text) {
-  if (isWails) return window.runtime.ClipboardSetText(text);
-  return navigator.clipboard.writeText(text);
+    return window.runtime.ClipboardSetText(text);
 }
 
+/**
+ * Callback for OnFileDrop returns a slice of file path strings when a drop is finished.
+ *
+ * @export
+ * @callback OnFileDropCallback
+ * @param {number} x - x coordinate of the drop
+ * @param {number} y - y coordinate of the drop
+ * @param {string[]} paths - A list of file paths.
+ */
+
+/**
+ * OnFileDrop listens to drag and drop events and calls the callback with the coordinates of the drop and an array of path strings.
+ *
+ * @export
+ * @param {OnFileDropCallback} callback - Callback for OnFileDrop returns a slice of file path strings when a drop is finished.
+ * @param {boolean} [useDropTarget=true] - Only call the callback when the drop finished on an element that has the drop target style. (--wails-drop-target)
+ */
 export function OnFileDrop(callback, useDropTarget) {
-  if (!isWails) return () => {}; // Web 模式使用元素级 dragover/drop，见各组件
-  return window.runtime.OnFileDrop(callback, useDropTarget);
+    return window.runtime.OnFileDrop(callback, useDropTarget);
 }
 
-export function OnFileDropOff() { if (isWails) window.runtime.OnFileDropOff(); }
-export function CanResolveFilePaths() { return isWails ? window.runtime.CanResolveFilePaths() : false; }
-export function ResolveFilePaths(files) { return isWails ? window.runtime.ResolveFilePaths(files) : []; }
+/**
+ * OnFileDropOff removes the drag and drop listeners and handlers.
+ */
+export function OnFileDropOff() {
+    return window.runtime.OnFileDropOff();
+}
 
-export function InitializeNotifications() { return isWails ? window.runtime.InitializeNotifications() : Promise.resolve(false); }
-export function CleanupNotifications() { if (isWails) window.runtime.CleanupNotifications(); }
-export function IsNotificationAvailable() { return isWails ? window.runtime.IsNotificationAvailable() : false; }
-export function RequestNotificationAuthorization() { return isWails ? window.runtime.RequestNotificationAuthorization() : Promise.resolve('denied'); }
-export function CheckNotificationAuthorization() { return isWails ? window.runtime.CheckNotificationAuthorization() : Promise.resolve('denied'); }
+export function CanResolveFilePaths() {
+    return window.runtime.CanResolveFilePaths();
+}
+
+export function ResolveFilePaths(files) {
+    return window.runtime.ResolveFilePaths(files);
+}
+
+export function InitializeNotifications() {
+    return window.runtime.InitializeNotifications();
+}
+
+export function CleanupNotifications() {
+    return window.runtime.CleanupNotifications();
+}
+
+export function IsNotificationAvailable() {
+    return window.runtime.IsNotificationAvailable();
+}
+
+export function RequestNotificationAuthorization() {
+    return window.runtime.RequestNotificationAuthorization();
+}
+
+export function CheckNotificationAuthorization() {
+    return window.runtime.CheckNotificationAuthorization();
+}
+
 export function SendNotification(options) {
-  if (isWails) return window.runtime.SendNotification(options);
-  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-    new Notification(options.title || 'AI盘译', { body: options.message });
-  }
-  return Promise.resolve();
+    return window.runtime.SendNotification(options);
 }
-export function SendNotificationWithActions(options) { return SendNotification(options); }
-export function RegisterNotificationCategory(category) { if (isWails) window.runtime.RegisterNotificationCategory(category); }
-export function RemoveNotificationCategory(categoryId) { if (isWails) window.runtime.RemoveNotificationCategory(categoryId); }
-export function RemoveAllPendingNotifications() { if (isWails) window.runtime.RemoveAllPendingNotifications(); }
-export function RemovePendingNotification(identifier) { if (isWails) window.runtime.RemovePendingNotification(identifier); }
-export function RemoveAllDeliveredNotifications() { if (isWails) window.runtime.RemoveAllDeliveredNotifications(); }
-export function RemoveDeliveredNotification(identifier) { if (isWails) window.runtime.RemoveDeliveredNotification(identifier); }
-export function RemoveNotification(identifier) { if (isWails) window.runtime.RemoveNotification(identifier); }
+
+export function SendNotificationWithActions(options) {
+    return window.runtime.SendNotificationWithActions(options);
+}
+
+export function RegisterNotificationCategory(category) {
+    return window.runtime.RegisterNotificationCategory(category);
+}
+
+export function RemoveNotificationCategory(categoryId) {
+    return window.runtime.RemoveNotificationCategory(categoryId);
+}
+
+export function RemoveAllPendingNotifications() {
+    return window.runtime.RemoveAllPendingNotifications();
+}
+
+export function RemovePendingNotification(identifier) {
+    return window.runtime.RemovePendingNotification(identifier);
+}
+
+export function RemoveAllDeliveredNotifications() {
+    return window.runtime.RemoveAllDeliveredNotifications();
+}
+
+export function RemoveDeliveredNotification(identifier) {
+    return window.runtime.RemoveDeliveredNotification(identifier);
+}
+
+export function RemoveNotification(identifier) {
+    return window.runtime.RemoveNotification(identifier);
+}

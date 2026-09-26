@@ -504,7 +504,7 @@ import {
 } from '../../wailsjs/go/main/App'
 import { saveBase64 } from '@/utils/fileBridge.js'
 import { models } from '../../wailsjs/go/models'
-import { EventsOff, EventsOn } from '../../wailsjs/runtime'
+import { EventsOff, EventsOn } from '../../wailsjs/bridge'
 import { MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/preview.css'
 import html2canvas from 'html2canvas'

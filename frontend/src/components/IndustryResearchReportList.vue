@@ -4,7 +4,7 @@ import {GetStockList, IndustryResearchReport,EMDictCode} from "../../wailsjs/go/
 import {ArrowDownOutline, CaretDown, CaretUp, PulseOutline, Refresh, RefreshCircleSharp,} from "@vicons/ionicons5";
 
 import {useMessage} from "naive-ui";
-import {BrowserOpenURL} from "../../wailsjs/runtime";
+import {BrowserOpenURL} from "../../wailsjs/bridge";
 
 const message=useMessage()
 const list  = ref([])

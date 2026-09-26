@@ -57,7 +57,7 @@ const isShowToBottom = ref(false);
 const icon = ref('') // 由 GetVersionInfo().icon 注入本地内嵌图标，不再引用上游仓库外链
 import {darkTheme, NAvatar, NImage} from "naive-ui";
 import {ChatWithAgent, GetConfig, GetVersionInfo} from "../../wailsjs/go/main/App";
-import {EventsOff, EventsOn} from '../../wailsjs/runtime'
+import {EventsOff, EventsOn} from '../../wailsjs/bridge'
 import 'tdesign-vue-next/es/style/index.css';
 
 onBeforeUnmount(() => {

@@ -10,7 +10,7 @@ import {
   OpenURL,
   SearchFundCodes
 } from "../../wailsjs/go/main/App";
-import {Environment} from "../../wailsjs/runtime";
+import {Environment} from "../../wailsjs/bridge";
 import {useMessage} from "naive-ui";
 import StockLightweightKlineChart from "./StockLightweightKlineChart.vue";
 import StockSparkLine from "./stockSparkLine.vue";

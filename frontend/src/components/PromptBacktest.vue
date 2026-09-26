@@ -136,7 +136,7 @@ import {
   CreatePromptBacktestTask, DeletePromptBacktestTask, GetAiConfigs, GetPromptBacktestPicks,
   GetPromptBacktestTaskDetail, GetPromptBacktestTaskList, GetPromptTemplates
 } from '../../wailsjs/go/main/App'
-import {EventsOn, EventsOff} from '../../wailsjs/runtime'
+import {EventsOn, EventsOff} from '../../wailsjs/bridge'
 import * as echarts from 'echarts'
 
 const message = useMessage()

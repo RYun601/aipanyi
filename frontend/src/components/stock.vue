@@ -85,7 +85,7 @@ import {
   WindowFullscreen,
   WindowReload,
   WindowUnfullscreen
-} from '../../wailsjs/runtime'
+} from '../../wailsjs/bridge'
 import {Add, ChatboxOutline, CreateOutline} from '@vicons/ionicons5'
 import {MdEditor, MdPreview} from 'md-editor-v3';
 // preview.css相比style.css少了编辑器那部分样式

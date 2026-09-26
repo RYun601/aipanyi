@@ -139,7 +139,7 @@ import {
 } from '../../wailsjs/go/main/App'
 import {RefreshCircleSharp} from '@vicons/ionicons5'
 import {useMessage} from 'naive-ui'
-import {BrowserOpenURL, EventsOn} from '../../wailsjs/runtime/runtime'
+import {BrowserOpenURL, EventsOn} from '../../wailsjs/bridge'
 
 const message = useMessage()
 const loading = ref(false)

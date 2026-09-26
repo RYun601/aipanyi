@@ -1,6 +1,6 @@
 <script setup>
 import {ref, onBeforeUnmount} from "vue";
-import {EventsOn, EventsOff} from "../../wailsjs/runtime";
+import {EventsOn, EventsOff} from "../../wailsjs/bridge";
 import {useRoute} from 'vue-router'
 import FundFollow from "./FundFollow.vue";
 import FundRanking from "./FundRanking.vue";

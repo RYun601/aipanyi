@@ -1,13 +1,13 @@
 // @ts-check
-// AI盘译 前端绑定层（双模式）。
+// AI盘译 前端绑定层（双模式）—— 由 scripts/gen-bindings.js 自动生成，请勿手工编辑。
 //
-// 本文件由桥接层重新生成，取代 Wails 原生的 window['go'] 直接调用：
+// wails 原生生成的结果是 window['go'] 直连，只在桌面容器里有效；这里统一改写为
+// 走 bridge.js 的 call()，由它按运行环境分发：
 //   - 桌面模式（Wails）：转发到 window['go']['main']['App'][method]
 //   - Web 模式（浏览器）：POST /api/call 反射派发
 // 业务代码 import 方式不变。
 
 import { call } from '../../bridge.js';
-
 export function AbortChatWithAgent(...args) {
   return call('AbortChatWithAgent', args);
 }
@@ -172,16 +172,20 @@ export function CreateSkill(...args) {
   return call('CreateSkill', args);
 }
 
+export function DelPrompt(...args) {
+  return call('DelPrompt', args);
+}
+
+export function DeleteAIResponseResult(...args) {
+  return call('DeleteAIResponseResult', args);
+}
+
 export function DeleteAgentFeedback(...args) {
   return call('DeleteAgentFeedback', args);
 }
 
 export function DeleteAiRecommendStocks(...args) {
   return call('DeleteAiRecommendStocks', args);
-}
-
-export function DeleteAIResponseResult(...args) {
-  return call('DeleteAIResponseResult', args);
 }
 
 export function DeleteAllStockInfo(...args) {
@@ -250,10 +254,6 @@ export function DeleteStockChangeHistory(...args) {
 
 export function DeleteTradingRecord(...args) {
   return call('DeleteTradingRecord', args);
-}
-
-export function DelPrompt(...args) {
-  return call('DelPrompt', args);
 }
 
 export function DisableFilesystemSkill(...args) {
@@ -332,6 +332,14 @@ export function GenerateMorningStrategyNow(...args) {
   return call('GenerateMorningStrategyNow', args);
 }
 
+export function GetAIResponseResult(...args) {
+  return call('GetAIResponseResult', args);
+}
+
+export function GetAIResponseResultList(...args) {
+  return call('GetAIResponseResultList', args);
+}
+
 export function GetAgentFeedbackStats(...args) {
   return call('GetAgentFeedbackStats', args);
 }
@@ -350,14 +358,6 @@ export function GetAiRecommendStocksList(...args) {
 
 export function GetAiRecommendStocksTodayStats(...args) {
   return call('GetAiRecommendStocksTodayStats', args);
-}
-
-export function GetAIResponseResult(...args) {
-  return call('GetAIResponseResult', args);
-}
-
-export function GetAIResponseResultList(...args) {
-  return call('GetAIResponseResultList', args);
 }
 
 export function GetAllBKCodes(...args) {
@@ -400,12 +400,12 @@ export function GetAllKBVectorizingStatuses(...args) {
   return call('GetAllKBVectorizingStatuses', args);
 }
 
-export function GetAllMarkets(...args) {
-  return call('GetAllMarkets', args);
-}
-
 export function GetAllMCPTools(...args) {
   return call('GetAllMCPTools', args);
+}
+
+export function GetAllMarkets(...args) {
+  return call('GetAllMarkets', args);
 }
 
 export function GetAllSkills(...args) {
@@ -540,6 +540,10 @@ export function GetFeishuBotStatus(...args) {
   return call('GetFeishuBotStatus', args);
 }
 
+export function GetFollowList(...args) {
+  return call('GetFollowList', args);
+}
+
 export function GetFollowedFund(...args) {
   return call('GetFollowedFund', args);
 }
@@ -548,20 +552,12 @@ export function GetFollowedFundPaged(...args) {
   return call('GetFollowedFundPaged', args);
 }
 
-export function GetFollowList(...args) {
-  return call('GetFollowList', args);
-}
-
 export function GetFundHistoryNetValue(...args) {
   return call('GetFundHistoryNetValue', args);
 }
 
 export function GetFundKLine(...args) {
   return call('GetFundKLine', args);
-}
-
-export function GetfundList(...args) {
-  return call('GetfundList', args);
 }
 
 export function GetFundRanking(...args) {
@@ -684,18 +680,6 @@ export function GetLongTermMemoryInfo(...args) {
   return call('GetLongTermMemoryInfo', args);
 }
 
-export function GetMachineId(...args) {
-  return call('GetMachineId', args);
-}
-
-export function GetMarketEmotion(...args) {
-  return call('GetMarketEmotion', args);
-}
-
-export function GetMarketStatisticByDate(...args) {
-  return call('GetMarketStatisticByDate', args);
-}
-
 export function GetMCPServerByID(...args) {
   return call('GetMCPServerByID', args);
 }
@@ -706,6 +690,18 @@ export function GetMCPServerList(...args) {
 
 export function GetMCPToolsByServerID(...args) {
   return call('GetMCPToolsByServerID', args);
+}
+
+export function GetMachineId(...args) {
+  return call('GetMachineId', args);
+}
+
+export function GetMarketEmotion(...args) {
+  return call('GetMarketEmotion', args);
+}
+
+export function GetMarketStatisticByDate(...args) {
+  return call('GetMarketStatisticByDate', args);
 }
 
 export function GetMoneyRankSina(...args) {
@@ -936,6 +932,10 @@ export function GetVersionInfo(...args) {
   return call('GetVersionInfo', args);
 }
 
+export function GetfundList(...args) {
+  return call('GetfundList', args);
+}
+
 export function GlobalStockIndexes(...args) {
   return call('GlobalStockIndexes', args);
 }
@@ -1028,12 +1028,12 @@ export function IsUSTradingTime(...args) {
   return call('IsUSTradingTime', args);
 }
 
-export function ListAgentFeedback(...args) {
-  return call('ListAgentFeedback', args);
-}
-
 export function ListAIServicesForKB(...args) {
   return call('ListAIServicesForKB', args);
+}
+
+export function ListAgentFeedback(...args) {
+  return call('ListAgentFeedback', args);
 }
 
 export function ListFilesystemSkills(...args) {
@@ -1116,12 +1116,12 @@ export function QuitApp(...args) {
   return call('QuitApp', args);
 }
 
-export function ReadSkillFile(...args) {
-  return call('ReadSkillFile', args);
-}
-
 export function ReFleshTelegraphList(...args) {
   return call('ReFleshTelegraphList', args);
+}
+
+export function ReadSkillFile(...args) {
+  return call('ReadSkillFile', args);
 }
 
 export function RefreshAllTdxTransactionData(...args) {
@@ -1176,12 +1176,12 @@ export function RzrqTrend(...args) {
   return call('RzrqTrend', args);
 }
 
-export function SaveAiAssistantSession(...args) {
-  return call('SaveAiAssistantSession', args);
-}
-
 export function SaveAIResponseResult(...args) {
   return call('SaveAIResponseResult', args);
+}
+
+export function SaveAiAssistantSession(...args) {
+  return call('SaveAiAssistantSession', args);
 }
 
 export function SaveAsMarkdown(...args) {
@@ -1431,5 +1431,4 @@ export function ValidateCronExpr(...args) {
 export function WriteSkillFile(...args) {
   return call('WriteSkillFile', args);
 }
-
 

@@ -4,7 +4,7 @@ import {useRouter} from "vue-router";
 import {GetAiConfigs, UpdateAiConfigs, FetchAiModels, FetchAiModelInfo} from "../../wailsjs/go/main/App";
 import {NButton, NSpace, NTag, useMessage} from "naive-ui";
 import {data} from "../../wailsjs/go/models";
-import {EventsEmit} from "../../wailsjs/runtime";
+import {EventsEmit} from "../../wailsjs/bridge";
 import {ChevronLeftIcon, HelpCircleFilledIcon} from "tdesign-icons-vue-next";
 
 const message = useMessage()

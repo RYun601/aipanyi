@@ -19,7 +19,7 @@ import { ExportConfigData } from '../../wailsjs/go/main/App'
 import { isWeb } from '@/wailsjs/bridge.js'
 import {NTag, NTooltip, NIcon, useMessage} from "naive-ui";
 import {data, models} from "../../wailsjs/go/models";
-import {EventsEmit} from "../../wailsjs/runtime";
+import {EventsEmit} from "../../wailsjs/bridge";
 import {HelpCircleFilledIcon, HelpIcon} from "tdesign-icons-vue-next";
 
 const message = useMessage()

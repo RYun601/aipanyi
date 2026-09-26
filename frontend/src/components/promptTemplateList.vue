@@ -9,7 +9,7 @@ import {
   UpdatePromptTemplate,
   GetPromptTemplateBacktestDetail
 } from "../../wailsjs/go/main/App";
-import { EventsEmit } from "../../wailsjs/runtime";
+import { EventsEmit } from "../../wailsjs/bridge";
 import {NButton, NInput, NTag, NText, NSwitch, useMessage, useNotification,useDialog, NModal, NCard, NForm, NFormItem, NSpace, NPopover, NTable, NTooltip, NStatistic, NGrid, NGridItem, NDivider, NGradientText, NAlert, NSelect} from "naive-ui";
 import * as echarts from 'echarts';
 import { MdEditor, MdPreview } from 'md-editor-v3'

@@ -5,9 +5,9 @@ import { saveBase64 } from '@/utils/fileBridge.js'
 import { isWeb } from '@/wailsjs/bridge.js'
 import { BuildTableXLSXBytes } from '../../wailsjs/go/main/App'
 import {useMessage, NText, NTag, NButton, NPopconfirm, NDropdown, NIcon} from 'naive-ui'
-import {Environment} from "../../wailsjs/runtime"
+import {Environment} from "../../wailsjs/bridge"
 import {BookmarkOutline, TrashOutline, CreateOutline, AddOutline, FolderOpenOutline, DownloadOutline} from "@vicons/ionicons5";
-import {EventsEmit} from "../../wailsjs/runtime";
+import {EventsEmit} from "../../wailsjs/bridge";
 import StockLightweightKlineChart from "./StockLightweightKlineChart.vue";
 
 const message = useMessage()

@@ -20,7 +20,7 @@ import {
 } from "../../wailsjs/go/main/App";
 import { MarkdownContentForSave } from '../../wailsjs/go/main/App'
 import { isWeb } from '@/wailsjs/bridge.js'
-import {EventsOff, EventsOn} from "../../wailsjs/runtime";
+import {EventsOff, EventsOn} from "../../wailsjs/bridge";
 import NewsList from "./newsList.vue";
 import PolicyNewsList from "./PolicyNewsList.vue";
 import KLineChart from "./KLineChart.vue";

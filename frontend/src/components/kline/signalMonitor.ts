@@ -13,7 +13,7 @@
  * 数据不足时门控会**静默失效**，导致面板信号与图上箭头对不上。故取数 limit 与图表保持完全一致。
  */
 import { reactive, watch } from 'vue'
-import { EventsOn } from '../../../wailsjs/runtime'
+import { EventsOn } from '../../../wailsjs/bridge'
 import {
   ClearSignalRecords,
   GetSignalRecordPage,

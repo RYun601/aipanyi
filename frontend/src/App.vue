@@ -7,7 +7,7 @@ import {
   WindowFullscreen,
   WindowUnfullscreen,
   WindowSetTitle
-} from '../wailsjs/runtime'
+} from '../wailsjs/bridge'
 import {h, onBeforeMount, onBeforeUnmount, onMounted, ref, watch} from "vue";
 import {RouterLink, useRoute, useRouter} from 'vue-router'
 import { useResponsive } from './composables/useResponsive.js'

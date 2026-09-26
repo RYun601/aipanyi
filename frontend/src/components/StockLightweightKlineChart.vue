@@ -1,6 +1,6 @@
 <script setup>
 import { GetStockEastMoneyKLine, GetStockEastMoneyKLinePage, GetStockKLineWithFallback, GetStockKLinePageWithFallback, Follow, UnFollow, GetFollowList, GetGroupList, AddStockGroup, AddGroup } from '../../wailsjs/go/main/App'
-import { EventsEmit } from '../../wailsjs/runtime'
+import { EventsEmit } from '../../wailsjs/bridge'
 import {
   CandlestickSeries,
   createChart,
