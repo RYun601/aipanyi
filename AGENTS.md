@@ -30,11 +30,12 @@
 # 前端（两种模式共用，改任何 .vue/.js 后都要跑）
 cd frontend && npm install && npm run build && cd ..
 
-# 桌面模式（默认构建）
-go build -o aipanyi.exe .
+# 桌面模式（默认构建）—— 必须用 wails，不能用 go build
+# （go build 不会打包前端产物，也拿不到 Wails 运行时）
+wails build -platform windows/amd64 -o aipanyi
 
 # Web 模式（本地 HTTP 服务 + 默认浏览器）
-go build -tags web -o aipanyi-web.exe .
+wails build -tags web -platform windows/amd64 -o aipanyi-web
 
 # 验证（提交前必须全部通过）
 go build ./... && go build -tags web ./...
@@ -43,12 +44,44 @@ go test ./webserver/...
 cd frontend && npm run build
 ```
 
+> ⚠️ **`-o aipanyi` 不会自动补 `.exe`**。wails 只在未传 `-o` 走自动命名时才补后缀，
+> 所以产物是 `build/bin/aipanyi`（无扩展名）。CI 里已按此处理，本地自用可自行
+> `Copy-Item build/bin/aipanyi build/bin/aipanyi.exe`。
+
 **约定**：
 - 构建标签：**默认 = 桌面模式（Wails）**，`-tags web` = Web 模式，`-tags custom` = 定制版。
 - 任何改动都要保证**两种模式都能编译**，不能只验一种。
 - `gofmt -l` 报全仓库需格式化是**既有状态**（仓库为 CRLF 行尾），**不要**顺手全量格式化，
   否则会产生巨大的无关 diff。只保证自己新增/修改的文件风格一致。
 - `backend/data` 包测试报 DB 连接失败是**既有环境问题**，与改动无关，不要试图"修复"。
+
+### 2.1 双模式前端桥接层（改动前必读）
+
+前端要在**桌面（Wails）**和**浏览器（`-tags web`）**两种形态下跑同一份代码，
+全部差异收敛在 `frontend/wailsjs/bridge.js` 一个文件里。改前端运行时相关代码前，
+必须先理解这条边界，否则很容易把 Web 模式改坏：
+
+| 文件 | 谁生成 | 能不能手改 |
+|---|---|---|
+| `frontend/wailsjs/bridge.js` | 手工维护 | ✅ **唯一**该放双模式逻辑的地方 |
+| `frontend/wailsjs/go/main/App.js` | wails 生成 → `scripts/gen-bindings.js` 改写 | ❌ 不要手改，改生成脚本 |
+| `frontend/wailsjs/runtime/runtime.js` | wails 原生生成 | ❌ **严禁手改** |
+| `frontend/wailsjs/runtime/*.d.ts`、`package.json` | wails 原生生成 | ❌ 不要手改 |
+
+**为什么**：`wails build` 每次都会重新生成 `runtime/runtime.js`（没有任何开关可以跳过），
+也会重新生成 `go/main/App.js`（除非加 `-skipbindings`）。历史上双模式适配是手写在这两个
+文件里的，结果每次构建都会把 Web 模式静默改坏。现已全部迁入 `bridge.js`。
+
+**当前流程是自愈的**：
+- `npm run build` 会先跑 `scripts/gen-bindings.js`，把 wails 刚生成的原生 `App.js`
+  自动改写为走 `call()` 的桥接版（幂等，重复执行无副作用）；
+- 该脚本带失配断言：若 wails 改了生成格式导致正则失配，会以非零码退出、
+  让构建失败，而不会安静地产出一个 Web 模式不可用的包。
+
+**因此**：
+- 新增后端绑定方法后**不需要**手动同步 `App.js`，`wails build` 会自动带上；
+- 不要给构建命令加 `-skipbindings`，那反而会让绑定过期；
+- 前端 import 一律从 `@/wailsjs/bridge` 取，**不要**再从 `wailsjs/runtime` 取。
 
 ---
 
@@ -57,6 +90,11 @@ cd frontend && npm run build
 ### 3.1 分支模型
 
 - **`main` 是受保护分支，禁止直接 `git push` 到 main。**
+- 该约束由 GitHub ruleset（Settings → Rules → Rulesets → `main`）**实际强制执行**，
+  不只是文档约定：直推会收到 `GH013: Repository rule violations`。
+  ruleset 配置：Bypass list 为空（无人可绕过，含仓库所有者）、
+  `Require a pull request before merging` 已开启、`Required approvals = 0`
+  （单人开发下自己无法批准自己的 PR，0 是唯一可行值）。
 - 所有代码变更必须通过 **Pull Request** 合入 `main`。
 - 日常开发在功能分支上进行，例如：
   ```bash
