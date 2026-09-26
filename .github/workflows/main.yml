@@ -128,9 +128,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist-out
+          # 打印 build/bin，产物名不符预期时便于排查
+          ls -lh build/bin
           if [[ "${{ matrix.build.platform }}" == windows/* ]]; then
-            # Windows：wails 产物即 build/bin/<APP_NAME>.exe
-            cp "build/bin/${{ env.APP_NAME }}.exe" "dist-out/${{ matrix.build.name }}"
+            # Windows: wails 传入 -o 时不会自动补 .exe，
+            # 产物就是 build/bin/<APP_NAME>（无扩展名）。
+            # 最终 release asset 名字取 matrix.build.name，仍然带 .exe。
+            cp "build/bin/${{ env.APP_NAME }}" "dist-out/${{ matrix.build.name }}"
           else
             # macOS：把 .app 打成 zip（与 appinfo.AssetDarwin 命名对齐）
             ( cd build/bin && zip -qr "${{ matrix.build.name }}" "${{ env.APP_NAME }}.app" )
