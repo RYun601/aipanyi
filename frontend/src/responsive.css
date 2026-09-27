@@ -39,6 +39,15 @@ img, video, canvas, iframe, embed, object {
   overflow-wrap: anywhere;
 }
 
+/* 提示气泡（tooltip）正文：naive-ui 的 n-gradient-text 硬编码
+   white-space: nowrap，并且正文由 color: transparent + background-clip: text
+   绘制，超出一行的部分既不换行也画不出来，用户看到的就是"提示信息被截断"。
+   气泡内的渐变文字一律恢复换行，并允许长链接断行。 */
+.n-tooltip .n-gradient-text {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
 /* 卡片内边距：小屏收窄，提升有效内容宽度 */
 .n-card {
   --n-padding-left: 16px;
