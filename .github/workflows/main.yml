@@ -46,7 +46,7 @@ jobs:
     runs-on: ${{ matrix.build.os }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -97,13 +97,17 @@ jobs:
       # 原因：该 action 是上游作者仓库的 fork，CI 跑的是别人仓库里的代码；
       # 且它自定义了 build-statement / build-key 两个非标准输入来注入 ldflags，
       # 换成官方 action 会丢掉这两个变量。原生步骤可控且无供应链信任问题。
+      # action 版本跟随官方主版本：checkout@v7 / setup-go@v7 / setup-node@v7 /
+      # upload-artifact@v7 / github-script@v9 —— 均为 Node 24 运行时，要求 runner ≥ 2.327.1
+      # （GitHub 托管 runner 天然满足；自建 runner 需先升级，否则会因版本过低失败）。
+      # 历史坑：这些 action 长期停在 v4/v5，每次构建都报 Node 20 弃用告警。
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: '1.27'
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22.22.2'
 
@@ -145,7 +149,7 @@ jobs:
       # 无论是否发版，产物一律上传为 run artifact（保留 14 天）。
       # 手动触发时没有 Release 可传，靠这一步在 run 页面直接下载。
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.build.name }}
           path: dist-out/*
@@ -164,7 +168,7 @@ jobs:
 
       - name: Update release for channel
         if: startsWith(github.ref, 'refs/tags/') && steps.channel.outputs.channel != 'release'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const { owner, repo } = context.repo;

@@ -312,13 +312,18 @@ CI 实际执行的是别人仓库里的代码；且它自定义了 `build-statem
 
 | 步骤 | 用法 |
 | --- | --- |
-| Checkout | `actions/checkout@v4`（原为 v2，已升级） |
-| Setup Go | `actions/setup-go@v5`，go-version 1.27 |
-| Setup Node | `actions/setup-node@v4`，node 22.22.2 |
+| Checkout | `actions/checkout@v7` |
+| Setup Go | `actions/setup-go@v7`，go-version 1.27 |
+| Setup Node | `actions/setup-node@v7`，node 22.22.2 |
 | Install Wails CLI | `go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0` |
 | Build | `wails build -platform <p> -ldflags "..." -o aipanyi` |
 | Package | Windows 直接取 `build/bin/*.exe`；macOS 用 `zip` 打包 `.app` |
 | Upload | `gh release upload <tag> dist-out/* --clobber` |
+
+action 版本统一跟随官方主版本（`checkout@v7`、`setup-go@v7`、`setup-node@v7`、
+`upload-artifact@v7`、`github-script@v9`）：这几个版本都跑在 Node 24 运行时上，
+要求 runner ≥ 2.327.1，GitHub 托管 runner 天然满足，自建 runner 需先升级。
+2026.09 升级前的旧组合（v4/v5）每次构建都会报 Node 20 弃用告警。
 
 ldflags 每个 `-X` 值都用单引号包裹：commit message / 声明文案含空格，
 不包裹会被 ldflags 按空格切碎（历史上正是因此导致 macOS 构建失败）。
@@ -327,7 +332,9 @@ ldflags 每个 `-X` 值都用单引号包裹：commit message / 声明文案含�
 去掉 `build-tags: ${{ github.ref_name }}`（把 tag 名当 Go build tag 传入，无实际作用）、
 合并三个 darwin 目标为单个 `darwin/universal`（与 `appinfo.AssetDarwin` 对齐）。
 
-> ⚠️ **未实机验证**：CI 只能在推送 tag 时触发，本地无法跑。首次发版请先用 `*-dev` tag 试一次。
+> ✅ **已实机验证（2026-09-27）**：`v1.0.0-dev` 两次 tag 构建三平台全绿
+> （run `36315478527` 13m35s、run `36319012740`），产物上传 Release 正常、体积与哈希可复算。
+> 手动触发（`workflow_dispatch`）用于"只出包不发版"：产物作为 run artifact 保留 14 天，需登录下载。
 
 #### 9.9.2 文档品牌统一
 
