@@ -124,3 +124,6 @@ frontend/package.json.md5
 
 # 本地工作笔记，不入库
 提问后信息检索逻辑流程.md
+
+# air 热重载临时目录（见 .air.toml 的 tmp_dir）
+/tmp/
