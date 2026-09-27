@@ -8,11 +8,13 @@
     pip install pillow
     python scripts/gen-appicon.py
 
-一次生成三个文件，缺一个都会出现"有的地方是新图标、有的地方还是旧的"：
+一次生成四个文件，缺一个都会出现"有的地方是新图标、有的地方还是旧的"：
 - build/appicon.png        → macOS .app 图标（wails 据此生成 iconfile.icns）、
                              //go:embed 为 icon → data.SetAppIcon（AI 分享图里的头像）
 - build/windows/icon.ico   → Windows exe 的资源图标（资源管理器/任务栏，多尺寸含 256）
 - build/app.ico            → //go:embed 为 icon2 → 系统托盘图标与各平台对话框图标
+- frontend/public/favicon.ico → 浏览器标签页图标（web 模式；vite 会拷进 dist，
+                             再被 //go:embed 进二进制）
 """
 import math
 import os
@@ -28,6 +30,7 @@ S = 1024 * SS
 K = S / 1024.0
 
 ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
+FAVICON_SIZES = [16, 24, 32, 48]      # 标签页用不到大尺寸
 
 
 def _px(*vals):
@@ -96,14 +99,15 @@ def main():
 
     targets = [
         (os.path.join(BUILD, "appicon.png"), None),
-        (os.path.join(BUILD, "windows", "icon.ico"), "ICO"),
-        (os.path.join(BUILD, "app.ico"), "ICO"),
+        (os.path.join(BUILD, "windows", "icon.ico"), ICO_SIZES),
+        (os.path.join(BUILD, "app.ico"), ICO_SIZES),
+        (os.path.join(REPO, "frontend", "public", "favicon.ico"), FAVICON_SIZES),
     ]
-    for path, fmt in targets:
+    for path, sizes in targets:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        if fmt == "ICO":
-            master.save(path, format="ICO", sizes=[(s, s) for s in ICO_SIZES])
-            print("wrote %s (sizes: %s)" % (path, ",".join(str(s) for s in ICO_SIZES)))
+        if sizes:
+            master.save(path, format="ICO", sizes=[(s, s) for s in sizes])
+            print("wrote %s (sizes: %s)" % (path, ",".join(str(s) for s in sizes)))
         else:
             master.save(path)
             print("wrote %s (%dx%d)" % (path, master.width, master.height))
