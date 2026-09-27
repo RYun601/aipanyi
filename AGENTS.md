@@ -132,6 +132,8 @@ cd frontend && npm run build
 
 3. 推送 tag：`git push origin v1.2.3-release`
 4. CI（`.github/workflows/main.yml`）自动构建三个产物（Windows x64、Windows ARM64、macOS universal，均为绿色版/便携版）并上传到该 tag 的 Release。
+5. 发布后：把 CI 产物下载回来计算 SHA256，写成 `SHA256SUMS.txt` 上传到同一 Release，并把校验值补进 Release 正文
+   （程序没有代码签名证书，用户靠校验值判断文件是否被篡改，见 README「首次运行的安全提示」）。
 
 ### 4.2 修改说明必须手写，禁用 GitHub 自动生成
 

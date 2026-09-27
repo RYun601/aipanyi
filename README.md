@@ -91,6 +91,21 @@ Linux 版目前不在 CI 发布范围内，需要自行构建，见 [`docs/BUILD
 > 程序的数据（`data\stock.db`、日志、缓存）都生成在**程序所在目录**，之后请不要再挪动 exe ——
 > 换目录启动等于换一套空白数据，自选股和设置会“消失”。升级时用新 exe 覆盖旧的即可，数据保留。
 
+> **首次运行的安全提示**：本项目的可执行文件**没有代码签名证书**，因此从网络下载后首次运行可能遇到：
+>
+> - Windows SmartScreen 提示「Windows 已保护你的电脑」→ 点「更多信息」→「仍要运行」
+> - 个别杀毒软件 / 安全卫士误报 → 加入信任区即可（未签名的新程序容易被误判）
+> - macOS 提示「无法验证开发者」→ 处理办法见 [RUN_MACOS_TERMINAL.md](docs/RUN_MACOS_TERMINAL.md)
+>
+> 想确认文件没被篡改：在 [Releases](https://github.com/RYun601/aipanyi/releases) 对应版本里找到 `SHA256SUMS.txt`，
+> 本地算一遍比对：
+>
+> ```powershell
+> Get-FileHash .\aipanyi-windows-amd64.exe -Algorithm SHA256
+> ```
+>
+> ⚠️ **只从本仓库的 Releases 页面下载**，第三方站点转发的同名文件无法保证安全。
+
 ### 从源码构建
 
 环境要求：Go **1.27+**、Node.js 22+、Wails CLI v2.15.0
