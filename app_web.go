@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"io/fs"
 
 	"aipanyi/backend/data"
 	"aipanyi/webserver"
@@ -29,7 +30,15 @@ func (a *App) startWebServer() error {
 	a.InitCronTasks()
 	preCacheTradingDays()
 
-	return webserver.Start(a, assets, webserver.Options{
+	// webserver 期望的 FS 以 dist 目录为根（index.html 就在根上）；
+	// 而 main.go 的 //go:embed frontend/dist 得到的 FS 根是仓库根目录，
+	// 直接透传会让首页返回 "index.html not found (frontend not built?)"。
+	webAssets, err := fs.Sub(assets, "frontend/dist")
+	if err != nil {
+		return err
+	}
+
+	return webserver.Start(a, webAssets, webserver.Options{
 		Port:        0,    // 0 = 从 webserver.DefaultPort 开始探测
 		OpenBrowser: true, // 启动后用默认浏览器打开
 	})
