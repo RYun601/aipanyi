@@ -87,10 +87,14 @@ DeepSeek、硅基流动、智谱AI、字节豆包（火山引擎）、阿里云�
 
 ### 2.1 下载软件
 
-从 GitHub Releases 页面下载对应版本的安装包：
+从 GitHub Releases 页面下载对应平台的**绿色版**文件（免安装，没有安装程序）：
 
 - Windows 版：`aipanyi-windows-amd64.exe`
-- macOS 版：`aipanyi-darwin-universal`
+- macOS 版：`aipanyi-darwin-universal.zip`
+
+> **Windows 用户请注意**：先新建一个专属文件夹（例如 `D:\AI盘译`），把 exe 放进去再双击运行。
+> 数据库、日志、缓存都生成在**程序所在目录**，之后请不要再挪动 exe —— 换目录启动等于换一套空白数据。
+> 升级时用新 exe 覆盖旧的即可，`data` 目录不受影响。
 
 ### 2.2 首次启动
 

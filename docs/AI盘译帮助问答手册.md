@@ -70,7 +70,7 @@
 
 ### Q: 如何下载和安装 AI盘译？
 
-**A:** 从 GitHub Releases 页面下载对应版本的安装包。Windows 版下载 `aipanyi-windows-amd64.exe`，macOS 版下载 `aipanyi-darwin-universal`。双击运行即可，首次启动会自动初始化 A 股/港股/美股基础数据，窗口大小会自适应屏幕分辨率。
+**A:** 从 GitHub Releases 页面下载对应平台的**绿色版**文件（免安装，没有安装程序）：Windows 版下载 `aipanyi-windows-amd64.exe`，macOS 版下载 `aipanyi-darwin-universal.zip`。双击运行即可，首次启动会自动初始化 A 股/港股/美股基础数据，窗口大小会自适应屏幕分辨率。Windows 用户建议先新建一个专属文件夹（如 `D:\AI盘译`）把 exe 放进去再运行，之后不要再挪动 —— 数据生成在程序所在目录，换目录启动等于换一套空白数据。
 
 ---
 

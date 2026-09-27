@@ -51,6 +51,8 @@ cd frontend && npm run build
 **约定**：
 - 构建标签：**默认 = 桌面模式（Wails）**，`-tags web` = Web 模式，`-tags custom` = 定制版。
 - 任何改动都要保证**两种模式都能编译**，不能只验一种。
+- 分发形态是**绿色版（便携版）**：只发单个 exe / zip，**没有安装器**，不要引入 NSIS 安装包
+  （`build/windows/installer/` 脚手架已删除，理由见 ADR-001 §9.9.1 与 README「下载即用」）。
 - `gofmt -l` 报全仓库需格式化是**既有状态**（仓库为 CRLF 行尾），**不要**顺手全量格式化，
   否则会产生巨大的无关 diff。只保证自己新增/修改的文件风格一致。
 - `backend/data` 包测试报 DB 连接失败是**既有环境问题**，与改动无关，不要试图"修复"。
@@ -129,7 +131,7 @@ cd frontend && npm run build
    | `v1.2.3-dev` | Dev 开发版 | 是 |
 
 3. 推送 tag：`git push origin v1.2.3-release`
-4. CI（`.github/workflows/main.yml`）自动构建四个平台产物并上传到该 tag 的 Release。
+4. CI（`.github/workflows/main.yml`）自动构建三个产物（Windows x64、Windows ARM64、macOS universal，均为绿色版/便携版）并上传到该 tag 的 Release。
 
 ### 4.2 修改说明必须手写，禁用 GitHub 自动生成
 
