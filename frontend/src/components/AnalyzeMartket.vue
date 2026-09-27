@@ -16,6 +16,12 @@ import * as echarts from "echarts";
 import {onMounted, onUnmounted, ref, computed, nextTick} from "vue";
 import { useChartAutoResize } from '../composables/useChartAutoResize.js';
 
+// 注意：ref 必须先声明再传给 useChartAutoResize。
+// 顶层 const 在声明前处于 TDZ，先使用会直接抛 ReferenceError，导致整个页面白屏。
+const chartRef = ref(null)
+const limitChartRef = ref(null)
+const tlineChartRef = ref(null)
+const rzrqChartRef = ref(null)
 // 图表容器自适应：容器尺寸变化时自动 resize
 const { register: registerChartRefResize } = useChartAutoResize(chartRef);
 const { register: registerLimitChartRefResize } = useChartAutoResize(limitChartRef);
@@ -32,9 +38,6 @@ const {darkTheme, chartHeight} = defineProps({
     default: false
   }
 })
-const limitChartRef = ref(null);
-const tlineChartRef = ref(null);
-const rzrqChartRef = ref(null);
 const kospiChartRef = ref(null);
 const hynixChartRef = ref(null);
 const samsungChartRef = ref(null);

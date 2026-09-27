@@ -118,6 +118,10 @@ const downColor = '#00da3c';
 const downBorderColor = '';
 const kLineChartRef = ref(null);
 const kLineChartRef2 = ref(null);
+// 下面两个 ref 必须在传给 useChartAutoResize 之前声明：
+// 顶层 const 在声明前处于 TDZ，先使用会直接抛 ReferenceError，导致整个页面白屏。
+const tdxTransactionChartRef = ref(null)
+const tdxNetInflowChartRef = ref(null)
 // 容器尺寸变化时自动 resize，避免缩放窗口 / 分栏后图表被裁切
 // 每个图表容器各自观测，避免共用一个 observer 导致部分图表不跟随
 const { register: registerChartResize } = useChartAutoResize(kLineChartRef2);
@@ -169,7 +173,6 @@ const tdxMinuteBundle = ref(null)  // TdxMinuteTimeDataBundle
 const tdxMinuteBundleList = ref([]) // 多日模式：[{ dateStr, bundle }]
 const tdxTransactionList = ref([]) // []TdxTransactionData
 const tdxTransactionLoading = ref(false)
-const tdxTransactionChartRef = ref(null)
 const tdxTransactionChart = ref(null)
 // 实时价格与涨跌幅（弹窗打开时轮询刷新）
 const tdxRealTimeInfo = ref({ price: 0, preClose: 0, changePercent: 0 })
@@ -371,7 +374,6 @@ const tdxNetInflowSeries = computed(() => {
   }
   return { xData, series }
 })
-const tdxNetInflowChartRef = ref(null)
 const tdxNetInflowChart = ref(null)
 function formatWan(v) {
   return (v / 10000).toLocaleString('zh-CN', { maximumFractionDigits: 2 })

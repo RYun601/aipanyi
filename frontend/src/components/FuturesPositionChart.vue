@@ -2,6 +2,9 @@
 import {onBeforeUnmount, onMounted, ref} from 'vue'
 import { useChartAutoResize } from '../composables/useChartAutoResize.js';
 
+// 注意：ref 必须先声明再传给 useChartAutoResize。
+// 顶层 const 在声明前处于 TDZ，先使用会直接抛 ReferenceError，导致整个页面白屏。
+const chartRef = ref(null)
 // 图表容器自适应：容器尺寸变化时自动 resize
 const { register: registerChartRefResize } = useChartAutoResize(chartRef);
 import * as echarts from 'echarts'
@@ -36,7 +39,6 @@ const currentVariety = ref(props.variety)
 const loading = ref(false)
 const summary = ref(null)
 const metaInfo = ref(null)
-const chartRef = ref(null)
 let chartInstance = null
 let resizeHandler = null
 
