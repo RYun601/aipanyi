@@ -74,34 +74,50 @@ OpenAI 兼容接口 / Ollama / LMStudio / AnythingLLM / DeepSeek / 智谱 / 豆�
 | --- | --- |
 | Windows x64 | `aipanyi-windows-amd64.exe` |
 | Windows ARM64 | `aipanyi-windows-arm64.exe` |
-| macOS | `aipanyi-darwin-universal.zip` |
-| Linux x64 | `aipanyi-linux-amd64` |
+| macOS（Intel + Apple Silicon 通用） | `aipanyi-darwin-universal.zip` |
 
-绿色版，解压即用，无安装器。首次启动后：
+**绿色版，免安装**：Windows 是单个 exe，双击即用，没有安装程序、也不写注册表；macOS 是 zip，解压得到 `.app`。
+Linux 版目前不在 CI 发布范围内，需要自行构建，见 [`docs/BUILD_LINUX.md`](docs/BUILD_LINUX.md)。
 
-1. 系统默认浏览器会自动打开本地界面（地址类似 `http://127.0.0.1:<随机端口>`）
+首次启动后：
+
+1. 打开应用窗口（桌面模式为原生窗口，大小自适应屏幕分辨率）
 2. 进入「设置」填入你的 AI 服务 API Key（没有 Key 也可以用 Ollama 跑本地模型）
 3. 输入股票代码或名称，开始提问
 
-端口每次启动随机生成，并带一次性 token 校验，本机之外的设备默认无法访问。
+首次启动会自动初始化 A 股/港股/美股基础数据，网络较慢时请耐心等待，不要连续重复打开程序。
+
+> **Windows 用户请注意**：先新建一个专属文件夹（例如 `D:\AI盘译`），把 exe 放进去再双击运行。
+> 程序的数据（`data\stock.db`、日志、缓存）都生成在**程序所在目录**，之后请不要再挪动 exe ——
+> 换目录启动等于换一套空白数据，自选股和设置会“消失”。升级时用新 exe 覆盖旧的即可，数据保留。
 
 ### 从源码构建
 
-环境要求：Go 1.24+、Node.js 20+
+环境要求：Go **1.27+**、Node.js 22+、Wails CLI v2.15.0
 
 ```bash
 git clone https://github.com/RYun601/aipanyi.git
 cd aipanyi
 
-# 1. 构建前端（两种模式共用）
+# 0. 安装 Wails CLI（一次性）
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
+
+# 1. 构建前端（两种模式共用；wails build 也会自动跑一遍）
 cd frontend && npm install && npm run build && cd ..
 
-# 2a. 桌面模式（默认，Wails 窗口）
-go build -o aipanyi.exe .
+# 2a. 桌面模式（默认，Wails 原生窗口）
+wails build -platform windows/amd64 -o aipanyi
 
 # 2b. Web 模式（本地 HTTP 服务 + 默认浏览器）
-go build -tags web -o aipanyi-web.exe .
+wails build -tags web -platform windows/amd64 -o aipanyi-web
 ```
+
+> ⚠️ `-o aipanyi` **不会自动补 `.exe`**：Windows 上产物是 `build/bin/aipanyi`（无扩展名），
+> 自行 `Copy-Item build/bin/aipanyi build/bin/aipanyi.exe` 即可。
+> 也不要用 `go build` 代替 `wails build` —— 拿不到 Wails 运行时，前端产物也不保证被打包进去。
+
+Web 模式下用系统默认浏览器打开本地界面（地址类似 `http://127.0.0.1:<随机端口>`），端口每次启动随机生成，
+并带一次性 token 校验，本机之外的设备默认无法访问；桌面模式则是原生窗口。
 
 更多细节见 [`docs/快速开始指南.md`](docs/快速开始指南.md) 与 [`docs/BUILD_LINUX.md`](docs/BUILD_LINUX.md)。
 
