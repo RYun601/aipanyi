@@ -152,6 +152,18 @@ func main() {
 	appWidth := config.WindowWidth
 	appHeight := config.WindowHeight
 
+	// 上次保存的尺寸未必还装得下：换屏、拔掉外接显示器、窗口被外部工具调整过，
+	// 都可能留下一个比当前屏幕还大的尺寸。Wails 会照这个尺寸把窗口居中到主屏上，
+	// 于是窗口四边全部落到屏幕外，标题栏和底部导航都点不到，用户自己救不回来。
+	// 因此"装不下"的尺寸一律视为无效：写回 0，落到下面的自适应默认值。
+	if appWidth > width || appHeight > height {
+		log.SugaredLogger.Warnf("saved window size %dx%d exceeds screen %dx%d, reset to auto",
+			appWidth, appHeight, width, height)
+		appWidth, appHeight = 0, 0
+		config.WindowWidth, config.WindowHeight = 0, 0
+		data.UpdateConfig(config)
+	}
+
 	// 若用户尚未调整过窗口或记录为 0，则按屏幕比例给一个合适默认值
 	if appWidth <= 0 || appHeight <= 0 {
 		appWidth = width * 5 / 10
