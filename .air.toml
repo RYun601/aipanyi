@@ -1,0 +1,108 @@
+# =============================================================================
+# air 热重载配置（AI盘译 / aipanyi，Go 后端）
+#
+# 为什么 cmd 里必须带 `-tags dev`：
+#   wails v2 用构建标签区分「真 App」和「空壳 App」。Windows 上
+#   github.com/wailsapp/wails/v2/internal/app/app_default_windows.go 的约束是
+#
+#       //go:build !dev && !production && !bindings && windows
+#
+#   也就是说：只要 go build 不带 dev / production / bindings 中的任意一个，
+#   编进去的就是那个只弹
+#       "Wails applications will not build without the correct build tags."
+#   错误对话框的空壳 CreateApp（只弹框、不启动窗口）。
+#
+#   air 的默认 cmd 是 `go build -o ./tmp/main.exe .`（不带任何标签），
+#   所以直接 `air` 必然弹这个框。
+#
+# 用法：
+#   cd frontend && npm install && npm run build && cd ..   # 首次 / 改了 .vue/.js 之后
+#   air
+#
+# 前端热更新：本配置只重启 Go 进程，前端资源是 main.go 里
+# `//go:embed frontend/dist` 的编译期内嵌产物，改完前端必须重新 npm run build。
+# =============================================================================
+
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  # tags 说明：
+  #   dev    —— 必加。等价于 `wails dev` 的 Go 侧标签，打开 devtools、日志走 debug。
+  #              不传 -frontenddevserverurl 时，前端走内嵌的 frontend/dist。
+  #   web    —— 本项目自己的 Web 模式标签，桌面模式开发不要加。
+  #   custom —— 本项目自己的定制版标签，不要加。
+  # 桌面模式 = 默认构建（!web && !custom），所以只需要 dev。
+  cmd = "go build -tags dev -o ./tmp/main.exe ."
+  # air v1.62+ 用 entrypoint 取代已废弃的 bin，格式为「产物路径 + 可选参数」
+  entrypoint = ["./tmp/main.exe"]
+
+  delay = 1000
+  # exclude_dir 排掉一切会白刷构建的目录：
+  # frontend / ai-assistant-web 是前端源码，改了要 npm run build，重启 Go 进程没用；
+  # build 下面是 160MB+ 的产物和打包资源，data 是本地 sqlite。
+  exclude_dir = [
+    "assets",
+    "tmp",
+    "vendor",
+    "testdata",
+    "node_modules",
+    "frontend",
+    "ai-assistant-web",
+    "data",
+    "logs",
+    "build",
+    "third_party",
+    "docs",
+    ".git",
+    ".github",
+  ]
+  exclude_file = []
+  exclude_regex = ["_test.go"]
+  exclude_unchanged = false
+  follow_symlink = false
+  include_dir = []
+  include_ext = ["go"]
+  include_file = []
+  log = "build-errors.log"
+  poll = false
+  post_cmd = []
+  pre_cmd = []
+  rerun = false
+  rerun_delay = 500
+  send_interrupt = false
+  stop_on_error = false
+
+[color]
+  app = ""
+  build = "yellow"
+  main = "magenta"
+  runner = "green"
+  watcher = "cyan"
+
+[log]
+  time = true
+
+[misc]
+  clean_on_exit = false
+
+[screen]
+  clear_on_rebuild = true
+  keep_scroll = true
+
+# -----------------------------------------------------------------------------
+# Web 模式（本地 HTTP 服务 + 浏览器）另建一份配置，例如 .air.web.toml：
+#
+#   root = "."
+#   tmp_dir = "tmp"
+#
+#   [build]
+#     cmd = "go build -tags web,dev -o ./tmp/aipanyi-web.exe ."
+#     entrypoint = ["./tmp/aipanyi-web.exe"]
+#     exclude_dir = ["assets", "tmp", "vendor", "testdata", "node_modules",
+#                    "frontend", "ai-assistant-web", "data", "logs", "build"]
+#     include_ext = ["go"]
+#
+# 然后：air -c .air.web.toml
+# 注意：Web 模式下前端同样走内嵌的 frontend/dist，改前端仍需 npm run build。
+# -----------------------------------------------------------------------------
