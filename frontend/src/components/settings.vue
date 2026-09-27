@@ -547,7 +547,7 @@ function deletePrompt(ID) {
                 </template>
                 <template #default>
                   <n-gradient-text :type="'warning'">
-                  <div style="max-width: 400px;text-align: left">
+                  <div class="tip-text">
                     更新通道说明：<br>
                     <b>Release（稳定版）</b>：仅接收正式发布版本，稳定性最高<br>
                     <b>Pre-release（预发布版）</b>：包含预发布版本，可提前体验新功能<br>
@@ -576,7 +576,7 @@ function deletePrompt(ID) {
                 </template>
                 <template #default>
                   <n-gradient-text :type="'warning'">
-                  <div style="max-width: 400px;text-align: left">
+                  <div class="tip-text">
                     获取方法：<br>
                     打开浏览器,访问东财网站，<br>
                     按F12打开开发人员工具-》网络面板，<br>
@@ -597,7 +597,7 @@ function deletePrompt(ID) {
                 </template>
                 <template #default>
                   <n-gradient-text :type="'warning'">
-                  <div style="max-width: 400px;text-align: left">
+                  <div class="tip-text">
                     获取方法：<br>
                     访问同花顺问财开放平台：<br>
                     <a href="https://open.iwencai.com" target="_blank" style="color: #63e2b7">https://www.iwencai.com/skillhub</a><br>
@@ -619,10 +619,10 @@ function deletePrompt(ID) {
                 </template>
                 <template #default>
                   <n-gradient-text :type="'warning'">
-                  <div style="max-width: 400px;text-align: left">
+                  <div class="tip-text">
                     获取方法：<br>
-                    访问东方财富妙想AI平台获取API Key。
-                    https://ai.eastmoney.com/mxClaw<br>
+                    访问东方财富妙想AI平台获取 API Key：<br>
+                    <a href="https://ai.eastmoney.com/mxClaw" target="_blank" style="color: #63e2b7">https://ai.eastmoney.com/mxClaw</a><br>
                     配置后可使用个股业绩点评功能。
                   </div>
                   </n-gradient-text>
@@ -918,5 +918,17 @@ function deletePrompt(ID) {
 .sponsor-code-input :deep(.n-input__input-el) {
   font-weight: 600;
   letter-spacing: 1px;
+}
+
+/* 帮助提示气泡的正文样式。
+   naive-ui 的 n-gradient-text 自带 white-space: nowrap，并且文字是
+   「color: transparent + background-clip: text」，只由背景渐变把字画出来。
+   长句子 / 长链接不换行时，超出气泡宽度的部分既排不下也画不出来，
+   在界面上就是"提示信息被截断"。这里显式允许换行并允许长链接断开。 */
+.tip-text {
+  max-width: 400px;
+  text-align: left;
+  white-space: normal;
+  word-break: break-word;
 }
 </style>
