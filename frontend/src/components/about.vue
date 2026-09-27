@@ -22,6 +22,13 @@ const theme = computed(() => darkTheme.value ? 'dark' : 'light')
 const manualScrollRef = ref(null)
 const catalogList = ref([])
 const sponsorQrLoading = ref(true)
+// 两张收款码都要等图片真正有结果（load 或 error）再撤 loading；
+// 只挂 @load 的话，某张图加载失败会让 spinner 永远转下去。
+let sponsorQrPending = 0
+const onSponsorQrSettled = () => {
+  if (sponsorQrPending > 0) sponsorQrPending--
+  if (sponsorQrPending <= 0) sponsorQrLoading.value = false
+}
 
 // 检查更新：后端要在 GitHub API + 代理测速后才能出结果（可能数十秒），
 // 这里点击即给出 loading 反馈，并随 updateCheckStatus 事件更新阶段文案
@@ -176,8 +183,13 @@ onMounted(() => {
     icon.value = res.icon;
     wechatQr.value = res.wxpay || ''
     alipayQr.value = res.alipay || ''
-
+    // 等两张图都出结果再撤 loading；一张都没配时直接撤
+    sponsorQrPending = (wechatQr.value ? 1 : 0) + (alipayQr.value ? 1 : 0)
+    if (sponsorQrPending === 0) sponsorQrLoading.value = false
   });
+
+  // 兜底：极端情况下图片事件不触发，5s 后强制撤掉 loading，避免一直转圈
+  setTimeout(() => { sponsorQrLoading.value = false }, 5000)
 
 
 
@@ -359,7 +371,8 @@ EventsOn("updateNeedAdmin", (msg) => {
                 class="sponsor-qr"
                 :class="{ 'is-loaded': !sponsorQrLoading }"
                 :preview-disabled="false"
-                @load="sponsorQrLoading = false"
+                @load="onSponsorQrSettled"
+                @error="onSponsorQrSettled"
               />
               <n-image
                 v-if="alipayQr"
@@ -367,7 +380,8 @@ EventsOn("updateNeedAdmin", (msg) => {
                 class="sponsor-qr"
                 :class="{ 'is-loaded': !sponsorQrLoading }"
                 :preview-disabled="false"
-                @load="sponsorQrLoading = false"
+                @load="onSponsorQrSettled"
+                @error="onSponsorQrSettled"
               />
             </div>
             <div v-else class="sponsor-empty">收款码未配置</div>
@@ -501,8 +515,14 @@ EventsOn("updateNeedAdmin", (msg) => {
   gap: 16px;
 }
 
-/* 按高度对齐：两张收款码原始宽高比不同（微信 989x1060 / 支付宝 740x928），
-   若按 width 归一化会一高一低。这里固定高度、宽度自适应，保证视觉齐平。 */
+/* 按高度对齐：两张收款码都是竖版（当前素材 900x1350），
+   若按 width 归一化会一高一低。这里固定高度、宽度自适应，保证视觉齐平。
+
+   注意：n-image 的根节点只是个外壳，真正的 <img> 渲染在组件内部。
+   只给外壳设 height 是不够的——内部 img 仍会按原始像素尺寸（900x1350）渲染，
+   从 300px 高的外壳里大幅溢出，两张图互相重叠成花屏。
+   所以必须用 :deep() 直接约束内部 img；max-width:none 用于覆盖 naive-ui
+   默认的 max-width:100%，否则会和 height:100% 互相牵制、算不出宽度。 */
 .sponsor-qr {
   display: block;
   height: clamp(200px, 40vh, 300px);
@@ -514,6 +534,15 @@ EventsOn("updateNeedAdmin", (msg) => {
 
 .sponsor-qr.is-loaded {
   opacity: 1;
+}
+
+.sponsor-qr :deep(img) {
+  display: block;
+  height: 100%;
+  width: auto;
+  max-width: none;
+  object-fit: contain;
+  border-radius: 8px;
 }
 
 .sponsor-tip {
