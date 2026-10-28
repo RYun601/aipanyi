@@ -2,17 +2,33 @@ package logger
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
-	"os"
-	"time"
 )
 
 var Logger *zap.Logger
 var SugaredLogger *zap.SugaredLogger
 
+// logDir 日志目录。桌面端默认 ./logs；Android 端通过 SetLogDir 指向应用私有目录。
+var logDir = "./logs"
+
 func init() {
+	InitLogger()
+}
+
+// SetLogDir 设置日志目录并重新初始化 logger。
+// Android 进程的工作目录是 "/"（不可写），必须在 Start 时改到 filesDir/logs。
+func SetLogDir(dir string) {
+	if dir == "" {
+		return
+	}
+	logDir = dir
+	_ = os.MkdirAll(logDir, 0o755)
 	InitLogger()
 }
 
@@ -113,7 +129,7 @@ func getInfoWriterSyncer() zapcore.WriteSyncer {
 
 	//引入第三方库 Lumberjack 加入日志切割功能
 	infoLumberIO := &lumberjack.Logger{
-		Filename:   "./logs/info.log",
+		Filename:   filepath.Join(logDir, "info.log"),
 		MaxSize:    10, // megabytes
 		MaxBackups: 100,
 		MaxAge:     28,    // days
@@ -125,7 +141,7 @@ func getInfoWriterSyncer() zapcore.WriteSyncer {
 func getErrorWriterSyncer() zapcore.WriteSyncer {
 	//引入第三方库 Lumberjack 加入日志切割功能
 	lumberWriteSyncer := &lumberjack.Logger{
-		Filename:   "./logs/error.log",
+		Filename:   filepath.Join(logDir, "error.log"),
 		MaxSize:    10, // megabytes
 		MaxBackups: 100,
 		MaxAge:     28,    // days
