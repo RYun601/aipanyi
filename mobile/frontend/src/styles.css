@@ -1,0 +1,257 @@
+:root {
+  --ap-bg: #f4f5f7;
+  --ap-card: #ffffff;
+  --ap-text: #1f2937;
+  --ap-muted: #8a94a6;
+  --ap-line: #eceef2;
+  --ap-primary: #2563eb;
+  --ap-up: #e5484d;
+  --ap-down: #12a150;
+  --ap-warn: #d97706;
+  --ap-tabbar: 56px;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: var(--ap-bg);
+  color: var(--ap-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 15px;
+}
+
+body {
+  /* 底部留白由 van-tabbar 的 placeholder 负责，避免重复占位 */
+  padding-bottom: 0;
+}
+
+.page {
+  min-height: 100vh;
+  padding: 8px 10px 16px;
+}
+
+.card {
+  background: var(--ap-card);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 10px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.muted {
+  color: var(--ap-muted);
+  font-size: 12px;
+}
+
+.small {
+  font-size: 13px;
+}
+
+.up {
+  color: var(--ap-up);
+}
+
+.down {
+  color: var(--ap-down);
+}
+
+.flat {
+  color: var(--ap-muted);
+}
+
+.price-big {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.price-mid {
+  font-size: 20px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.stock-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--ap-card);
+  border-radius: 12px;
+  margin-bottom: 8px;
+}
+
+.stock-item:active {
+  background: #f7f8fa;
+}
+
+.stock-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.stock-name {
+  font-size: 16px;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stock-sub {
+  margin-top: 3px;
+  color: var(--ap-muted);
+  font-size: 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.stock-quote {
+  text-align: right;
+  min-width: 86px;
+}
+
+.tag-mini {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #eef2ff;
+  color: #4f46e5;
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.empty-box {
+  padding: 64px 16px;
+}
+
+.floating-add {
+  position: fixed;
+  right: 16px;
+  bottom: calc(var(--ap-tabbar) + env(safe-area-inset-bottom) + 16px);
+  z-index: 20;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.35);
+}
+
+.md-body {
+  font-size: 15px;
+  line-height: 1.75;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.md-body h1,
+.md-body h2,
+.md-body h3,
+.md-body h4 {
+  margin: 14px 0 8px;
+  line-height: 1.35;
+}
+
+.md-body h1 {
+  font-size: 20px;
+}
+.md-body h2 {
+  font-size: 18px;
+}
+.md-body h3 {
+  font-size: 16px;
+}
+
+.md-body p {
+  margin: 8px 0;
+}
+
+.md-body ul,
+.md-body ol {
+  padding-left: 20px;
+  margin: 6px 0;
+}
+
+.md-body table {
+  width: 100%;
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+  font-size: 13px;
+}
+
+.md-body th,
+.md-body td {
+  border: 1px solid var(--ap-line);
+  padding: 5px 7px;
+  text-align: left;
+}
+
+.md-body code {
+  background: #f3f4f6;
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 13px;
+}
+
+.md-body pre {
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 10px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+
+.md-body blockquote {
+  margin: 8px 0;
+  padding: 6px 10px;
+  border-left: 3px solid #c7d2fe;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.hint {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #9a3412;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.sheet {
+  padding: 16px 14px calc(16px + env(safe-area-inset-bottom));
+}
+
+.sheet-title {
+  font-size: 17px;
+  font-weight: 650;
+  margin-bottom: 12px;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.divider {
+  height: 1px;
+  background: var(--ap-line);
+  margin: 10px 0;
+}

@@ -127,3 +127,13 @@ frontend/package.json.md5
 
 # air 热重载临时目录（见 .air.toml 的 tmp_dir）
 /tmp/
+
+# Android 移动端
+/mobile/frontend/node_modules/
+/mobile/webui/dist/
+/mobile/android/app/libs/*.aar
+/mobile/android/.gradle/
+/mobile/android/build/
+/mobile/android/app/build/
+/mobile/android/local.properties
+/mobile/android/.idea/
