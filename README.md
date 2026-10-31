@@ -68,7 +68,8 @@ OpenAI 兼容接口 / Ollama / LMStudio / AnythingLLM / DeepSeek / 智谱 / 豆�
 
 仓库内新增 `mobile/` 独立 Android 客户端，面向手机上的轻量使用场景：
 
-- 自选、成本/持仓、AI 分析、AI 配置与系统提示词、价格触发提醒（30 秒轮询）
+- 自选、成本/持仓、AI 分析（可选是否带入持仓/组合，默认关闭，开启后逐只选择）、
+  AI 配置与系统提示词、价格触发提醒（30 秒轮询）
 - 数据保存在手机本地 SQLite，不上云；AI 请求直达你配置的模型服务
 - 当前为 debug 侧载版，未纳入 CI 发布；构建与 Honor/MagicOS 设置见
   [`mobile/android/README.md`](mobile/android/README.md)
