@@ -1196,23 +1196,35 @@ onMounted(() => {
   });
 
   message.loading("Loading...")
-  GetFollowList(currentGroupId.value).then(result => {
-
-    followList.value = result
-    for (const followedStock of result) {
-      if (followedStock.StockCode.startsWith("us")) {
-        followedStock.StockCode = "gb_" + followedStock.StockCode.replace("us", "").toLowerCase()
+  GetFollowList(currentGroupId.value)
+    .then(result => {
+      const list = result || []
+      followList.value = list
+      for (const followedStock of list) {
+        if (followedStock.StockCode.startsWith("us")) {
+          followedStock.StockCode = "gb_" + followedStock.StockCode.replace("us", "").toLowerCase()
+        }
+        if (!stocks.value.includes(followedStock.StockCode)) {
+          stocks.value.push(followedStock.StockCode)
+        }
+        Greet(followedStock.StockCode).then(result => {
+          updateData(result)
+        })
       }
-      if (!stocks.value.includes(followedStock.StockCode)) {
-        stocks.value.push(followedStock.StockCode)
-      }
-      Greet(followedStock.StockCode).then(result => {
-        updateData(result)
+      //monitor()
+    })
+    .catch(err => {
+      followList.value = []
+      console.error("加载自选股失败:", err)
+      notify.error({
+        title: "加载自选股失败",
+        content: String(err?.message || err),
+        duration: 5000,
       })
-    }
-    //monitor()
-    message.destroyAll()
-  })
+    })
+    .finally(() => {
+      message.destroyAll()
+    })
 
   GetVersionInfo().then((res) => {
     icon.value = res.icon
@@ -1489,7 +1501,8 @@ function doFollowStock(groupId) {
           }
         }).catch(err => message.error('加入分组失败: ' + (err?.message || err)))
       }
-      GetFollowList(currentGroupId.value).then(result => { followList.value = result })
+      GetFollowList(currentGroupId.value).then(result => { followList.value = result || [] })
+        .catch(err => message.error('刷新自选股失败: ' + (err?.message || err)))
       monitor()
     } else {
       message.error(result)
@@ -3022,15 +3035,19 @@ function updateCostPriceAndVolumeNew(code, price, volume, alarm, formModel) {
     modalShow.value = false
     message.success(result)
     GetFollowList(currentGroupId.value).then(result => {
-      followList.value = result
+      const list = result || []
+      followList.value = list
       stocks.value = []
-      for (const followedStock of result) {
+      for (const followedStock of list) {
         if (!stocks.value.includes(followedStock.StockCode)) {
           stocks.value.push(followedStock.StockCode)
         }
       }
       monitor()
       message.destroyAll()
+    }).catch(err => {
+      message.destroyAll()
+      message.error("加载自选股失败: " + (err?.message || err))
     })
   })
 }
@@ -3681,9 +3698,10 @@ function updateTab(name) {
   const tabId= Number(name)
   currentGroupId.value = tabId;
   GetFollowList(tabId).then(result => {
-    followList.value = result
+    const list = result || []
+    followList.value = list
 
-    for (const followedStock of result) {
+    for (const followedStock of list) {
       if (followedStock.StockCode.startsWith("us")) {
         followedStock.StockCode = "gb_" + followedStock.StockCode.replace("us", "").toLowerCase()
       }
@@ -3694,6 +3712,10 @@ function updateTab(name) {
     }
     //monitor()
     message.destroyAll()
+  }).catch(err => {
+    followList.value = []
+    message.destroyAll()
+    message.error("加载自选股失败: " + (err?.message || err))
   })
 }
 
@@ -3803,7 +3825,11 @@ watch([tdxAmountFilter, filteredTdxTransactionList], () => {
           flex-height
           :scroll-x="1400"
           style="height: calc(100dvh - 190px);"
-        />
+        >
+          <template #empty>
+            <n-empty description="暂无自选股，点击右上角「关注」添加" size="small" style="padding: 24px 0"/>
+          </template>
+        </n-data-table>
       </div>
     </n-tab-pane>
     <n-tab-pane closable v-for="group in groupList" :group-id="group.ID" :name="String(group.ID)" :tab="group.name">
