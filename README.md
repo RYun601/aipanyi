@@ -65,14 +65,14 @@ OpenAI 兼容接口 / Ollama / LMStudio / AnythingLLM / DeepSeek / 智谱 / 豆�
 
 ---
 
-## 📱 Android 手机端（实验，已提供侧载包）
+## 📱 Android 手机端（实验，已提供安装包）
 
 仓库内包含 `mobile/` 独立 Android 客户端，面向手机上的轻量使用场景：
 
 - 自选、成本/持仓、AI 分析（可选是否带入持仓/组合，默认关闭，开启后逐只选择）、
   AI 配置与系统提示词、价格触发提醒（30 秒轮询）
 - 数据保存在手机本地 SQLite，不上云；AI 请求直达你配置的模型服务
-- 当前为 **debug 签名、arm64-v8a** 侧载版，安装包随 Release 提供：
+- 当前为 **debug 签名、arm64-v8a** 安装包，随 Release 提供：
   `aipanyi-android-0.1.0-debug.apk`。桌面三平台由 CI 自动构建，Android APK 目前由本地脚本构建后手动上传。
 - 构建与 Honor/MagicOS 设置见 [`mobile/android/README.md`](mobile/android/README.md)
 - 设计与真机验收记录见
@@ -94,11 +94,11 @@ OpenAI 兼容接口 / Ollama / LMStudio / AnythingLLM / DeepSeek / 智谱 / 豆�
 | Windows x64 | `aipanyi-windows-amd64.exe` |
 | Windows ARM64 | `aipanyi-windows-arm64.exe` |
 | macOS（Intel + Apple Silicon 通用） | `aipanyi-darwin-universal.zip` |
-| Android arm64-v8a | `aipanyi-android-0.1.0-debug.apk`（debug 侧载） |
+| Android arm64-v8a | `aipanyi-android-0.1.0-debug.apk`（debug 安装包，手动安装） |
 
 **绿色版，免安装**：Windows 是单个 exe，双击即用，没有安装程序、也不写注册表；macOS 是 zip，解压得到 `.app`。
 Linux 版目前不在 CI 发布范围内，需要自行构建，见 [`docs/BUILD_LINUX.md`](docs/BUILD_LINUX.md)。
-Android APK 为 debug 签名、arm64-v8a，旁路安装前需要在系统设置中允许安装未知来源应用。
+Android APK 为 debug 签名、arm64-v8a，手动安装前需要在系统设置中允许安装未知来源应用。
 
 首次启动后：
 
