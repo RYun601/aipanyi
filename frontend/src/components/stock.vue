@@ -1196,7 +1196,11 @@ onMounted(() => {
   });
 
   message.loading("Loading...")
-  GetFollowList(currentGroupId.value)
+  const loadFollowList = GetFollowList(currentGroupId.value)
+  const loadTimeout = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error("加载自选股超时，请稍后重试")), 12000)
+  })
+  Promise.race([loadFollowList, loadTimeout])
     .then(result => {
       const list = result || []
       followList.value = list
