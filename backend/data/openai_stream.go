@@ -12,12 +12,12 @@ import (
 	"aipanyi/backend/models"
 	"aipanyi/backend/util"
 
+	"aipanyi/backend/events"
 	"github.com/duke-git/lancet/v2/convertor"
 	"github.com/duke-git/lancet/v2/mathutil"
 	"github.com/duke-git/lancet/v2/random"
 	"github.com/duke-git/lancet/v2/strutil"
 	"github.com/tidwall/gjson"
-	"aipanyi/backend/events"
 )
 
 // buildUserMessageContent 构造用户消息的 content。
@@ -438,6 +438,20 @@ func (o *OpenAi) NewChatStream(stock, stockCode, userQuestion string, sysPromptI
 			replaceTemplates["{{costPrice}}"] = convertor.ToString(followedStock.CostPrice)
 			replaceTemplates["{costPrice}"] = convertor.ToString(followedStock.CostPrice)
 			replaceTemplates["costPrice"] = convertor.ToString(followedStock.CostPrice)
+		} else {
+			// 未设置成本时也替换占位符，避免模板里出现裸 {{costPrice}} 被模型当成真实数据。
+			replaceTemplates["{{costPrice}}"] = "未设置"
+			replaceTemplates["{costPrice}"] = "未设置"
+			replaceTemplates["costPrice"] = "未设置"
+		}
+		if followedStock.Volume > 0 {
+			replaceTemplates["{{costVolume}}"] = convertor.ToString(followedStock.Volume)
+			replaceTemplates["{costVolume}"] = convertor.ToString(followedStock.Volume)
+			replaceTemplates["costVolume"] = convertor.ToString(followedStock.Volume)
+		} else {
+			replaceTemplates["{{costVolume}}"] = "未设置"
+			replaceTemplates["{costVolume}"] = "未设置"
+			replaceTemplates["costVolume"] = "未设置"
 		}
 
 		question := ""
@@ -450,15 +464,26 @@ func (o *OpenAi) NewChatStream(stock, stockCode, userQuestion string, sysPromptI
 		wg := &sync.WaitGroup{}
 		wg.Add(8)
 
+		var msgMu sync.Mutex
+		sealed := false
+		appendMsg := func(m ...map[string]interface{}) {
+			msgMu.Lock()
+			defer msgMu.Unlock()
+			if sealed {
+				return
+			}
+			msg = append(msg, m...)
+		}
+
 		go func() {
 			defer wg.Done()
 			datas := NewMarketNewsApi().InteractiveAnswer(1, 100, stock)
 			content := util.MarkdownTableWithTitle("当前最新投资者互动数据", datas.Results)
-			msg = append(msg, map[string]interface{}{
+			appendMsg(map[string]interface{}{
 				"role":    "user",
 				"content": "投资者互动数据",
 			})
-			msg = append(msg, map[string]interface{}{
+			appendMsg(map[string]interface{}{
 				"role":              "assistant",
 				"reasoning_content": "使用工具查询",
 				"content":           content,
@@ -481,11 +506,11 @@ func (o *OpenAi) NewChatStream(stock, stockCode, userQuestion string, sysPromptI
 			md4 := util.MarkdownTableWithTitle("采购经理人指数(PMI)", res4.PMIResult.Data)
 			market.WriteString(md4)
 
-			msg = append(msg, map[string]interface{}{
+			appendMsg(map[string]interface{}{
 				"role":    "user",
 				"content": "国内宏观经济数据",
 			})
-			msg = append(msg, map[string]interface{}{
+			appendMsg(map[string]interface{}{
 				"role":              "assistant",
 				"reasoning_content": "使用工具查询",
 				"content":           "\n# 国内宏观经济数据：\n" + market.String(),
@@ -510,11 +535,11 @@ func (o *OpenAi) NewChatStream(stock, stockCode, userQuestion string, sysPromptI
 					return true
 				})
 			}
-			msg = append(msg, map[string]interface{}{
+			appendMsg(map[string]interface{}{
 				"role":    "user",
 				"content": "近期重大事件/会议",
 			})
-			msg = append(msg, map[string]interface{}{
+			appendMsg(map[string]interface{}{
 				"role":              "assistant",
 				"reasoning_content": "使用工具查询",
 				"content":           "近期重大事件/会议如下：\n" + md.String(),
@@ -547,11 +572,11 @@ func (o *OpenAi) NewChatStream(stock, stockCode, userQuestion string, sysPromptI
 				}
 				jsonData, _ := json.Marshal(Kmap)
 				markdownTable, _ := JSONToMarkdownTable(jsonData)
-				msg = append(msg, map[string]interface{}{
+				appendMsg(map[string]interface{}{
 					"role":    "user",
 					"content": stock + "日K数据",
 				})
-				msg = append(msg, map[string]interface{}{
+				appendMsg(map[string]interface{}{
 					"role":    "assistant",
 					"content": "## " + stock + "日K数据如下：\n" + markdownTable,
 				})
@@ -576,11 +601,11 @@ func (o *OpenAi) NewChatStream(stock, stockCode, userQuestion string, sysPromptI
 			for _, message := range *messages {
 				price += message + ";"
 			}
-			msg = append(msg, map[string]interface{}{
+			appendMsg(map[string]interface{}{
 				"role":    "user",
 				"content": stock + "股价数据",
 			})
-			msg = append(msg, map[string]interface{}{
+			appendMsg(map[string]interface{}{
 				"role":    "assistant",
 				"content": "\n## " + stock + "股价数据：\n" + price,
 			})
@@ -607,12 +632,12 @@ func (o *OpenAi) NewChatStream(stock, stockCode, userQuestion string, sysPromptI
 				go events.Emit(o.ctx, "warnMsg", "❗获取股票财报失败,分析结果可能不准确")
 				return
 			}
-			msg = append(msg, map[string]interface{}{
+			appendMsg(map[string]interface{}{
 				"role":    "user",
 				"content": stock + "财报数据",
 			})
 			for _, message := range *messages {
-				msg = append(msg, map[string]interface{}{
+				appendMsg(map[string]interface{}{
 					"role":    "assistant",
 					"content": stock + message,
 				})
@@ -631,11 +656,11 @@ func (o *OpenAi) NewChatStream(stock, stockCode, userQuestion string, sysPromptI
 				messageText.WriteString("## " + telegraph.Time + ":" + "\n")
 				messageText.WriteString("### " + telegraph.Content + "\n")
 			}
-			msg = append(msg, map[string]interface{}{
+			appendMsg(map[string]interface{}{
 				"role":    "user",
 				"content": "市场资讯",
 			})
-			msg = append(msg, map[string]interface{}{
+			appendMsg(map[string]interface{}{
 				"role":    "assistant",
 				"content": messageText.String(),
 			})
@@ -652,17 +677,32 @@ func (o *OpenAi) NewChatStream(stock, stockCode, userQuestion string, sysPromptI
 			for _, message := range *messages {
 				newsText.WriteString(message + "\n")
 			}
-			msg = append(msg, map[string]interface{}{
+			appendMsg(map[string]interface{}{
 				"role":    "user",
 				"content": stock + "相关新闻资讯",
 			})
-			msg = append(msg, map[string]interface{}{
+			appendMsg(map[string]interface{}{
 				"role":    "assistant",
 				"content": newsText.String(),
 			})
 		}()
 
-		wg.Wait()
+		// 手机网络/部分数据源可能长时间不返回；最多等 20 秒，用已到的数据继续分析，
+		// 避免整个 AI 分析卡在 300 秒的 HTTP 超时上。
+		done := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(20 * time.Second):
+			logger.SugaredLogger.Warnf("NewChatStream: context fetch timeout, continue with partial data")
+		}
+		msgMu.Lock()
+		sealed = true
+		msg = append([]map[string]interface{}{}, msg...)
+		msgMu.Unlock()
 
 		msg = append(msg, map[string]interface{}{
 			"role":    "user",

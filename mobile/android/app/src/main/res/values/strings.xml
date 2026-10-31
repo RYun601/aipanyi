@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">AI盘译</string>
+    <string name="monitor_channel_name">价格监控</string>
+    <string name="monitor_channel_desc">保持价格提醒在后台运行</string>
+    <string name="alert_channel_name">价格提醒</string>
+    <string name="alert_channel_desc">股票达到设定价格时通知</string>
+</resources>

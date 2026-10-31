@@ -21,8 +21,44 @@ import (
 
 var Dao *gorm.DB
 
-// dbMaxConns 连接池上限。VACUUM 前后需要按此值临时排空/恢复空闲连接。
+// dbMaxConns 连接池上限（桌面默认）。VACUUM 前后需要按此值临时排空/恢复空闲连接。
 const dbMaxConns = 8
+
+// Options SQLite 打开参数。移动端内存/磁盘比桌面紧张，用 MobileOptions 降低页缓存。
+type Options struct {
+	BusyTimeoutMS     int   // busy_timeout，默认 10000
+	CacheSizeKB       int   // 每连接页缓存，默认 131072（128MB）
+	MmapSizeBytes     int64 // mmap 大小，默认 256MB
+	MaxConns          int   // 连接池上限，默认 8
+	WALAutoCheckpoint int   // WAL 自动 checkpoint 页数，默认 2000
+}
+
+// DefaultOptions 桌面端默认参数（与历史行为一致）。
+func DefaultOptions() Options {
+	return Options{
+		BusyTimeoutMS:     10000,
+		CacheSizeKB:       131072,
+		MmapSizeBytes:     268435456,
+		MaxConns:          dbMaxConns,
+		WALAutoCheckpoint: 2000,
+	}
+}
+
+// MobileOptions Android 端参数：连接少、页缓存小，避免 8 个连接各占 128MB。
+func MobileOptions() Options {
+	return Options{
+		BusyTimeoutMS:     10000,
+		CacheSizeKB:       8192, // 8MB/连接
+		MmapSizeBytes:     67108864,
+		MaxConns:          4,
+		WALAutoCheckpoint: 1000,
+	}
+}
+
+var (
+	currentOptions  = DefaultOptions()
+	currentMaxConns = dbMaxConns
+)
 
 // dbFilePath 实际使用的数据库文件路径，供 VACUUM 等维护操作定位文件
 var dbFilePath string
@@ -48,27 +84,51 @@ func resolveDBPath(path string) string {
 // 也覆盖未来可能新增的"先查后写"事务。基准见 BenchmarkTxLock。
 const txLockClause = "&_txlock=immediate"
 
-// sqliteDSN 拼装 modernc.org/sqlite 风格 DSN。
+// sqliteDSN 拼装 modernc.org/sqlite 风格 DSN（桌面默认参数）。
+func sqliteDSN(path string) string {
+	return sqliteDSNWithOptions(path, DefaultOptions())
+}
+
+// sqliteDSNWithOptions 按给定参数拼装 DSN。
 // busy_timeout/cache_size/mmap_size 等均为连接级 PRAGMA，必须通过 DSN 下发才能对
 // 连接池中每个新建连接生效（对单个连接 Exec 只影响那一个连接）。
-func sqliteDSN(path string) string {
+func sqliteDSNWithOptions(path string, opts Options) string {
 	if path == "" {
 		path = "data/stock.db"
 	}
 	if strings.Contains(path, "_pragma=") {
 		return path // 调用方已自带参数，尊重原样
 	}
-	return path + "?_pragma=busy_timeout(10000)" +
+	def := DefaultOptions()
+	if opts.BusyTimeoutMS <= 0 {
+		opts.BusyTimeoutMS = def.BusyTimeoutMS
+	}
+	if opts.CacheSizeKB <= 0 {
+		opts.CacheSizeKB = def.CacheSizeKB
+	}
+	if opts.MmapSizeBytes <= 0 {
+		opts.MmapSizeBytes = def.MmapSizeBytes
+	}
+	if opts.WALAutoCheckpoint <= 0 {
+		opts.WALAutoCheckpoint = def.WALAutoCheckpoint
+	}
+	return path + fmt.Sprintf("?_pragma=busy_timeout(%d)", opts.BusyTimeoutMS) +
 		"&_pragma=journal_mode(WAL)" +
 		"&_pragma=synchronous(NORMAL)" +
-		"&_pragma=cache_size(-131072)" + // 每连接页缓存上限 128MB（池扩容后按连接摊薄）
-		"&_pragma=mmap_size(268435456)" + // 256MB 内存映射 IO，加速读且多连接共享 OS 页缓存
-		"&_pragma=temp_store(MEMORY)" + // 临时表/排序走内存
-		"&_pragma=wal_autocheckpoint(2000)" + // WAL 超过约 8MB 才自动 checkpoint，降低交易时段高频写的卡顿
+		fmt.Sprintf("&_pragma=cache_size(-%d)", opts.CacheSizeKB) +
+		fmt.Sprintf("&_pragma=mmap_size(%d)", opts.MmapSizeBytes) +
+		"&_pragma=temp_store(MEMORY)" +
+		fmt.Sprintf("&_pragma=wal_autocheckpoint(%d)", opts.WALAutoCheckpoint) +
 		txLockClause
 }
 
 func Init(sqlitePath string) {
+	InitWithOptions(sqlitePath, DefaultOptions())
+}
+
+// InitWithOptions 以指定 SQLite 参数打开数据库。
+// 桌面端调用 Init（默认参数）；Android 端调用 InitWithOptions(path, MobileOptions())。
+func InitWithOptions(sqlitePath string, opts Options) {
 	dbLogger := logger.New(
 		log.New(os.Stdout, "\r\n", log.LstdFlags),
 		logger.Config{
@@ -79,8 +139,14 @@ func Init(sqlitePath string) {
 			LogLevel:                  logger.Silent,
 		},
 	)
+	def := DefaultOptions()
+	if opts.MaxConns <= 0 {
+		opts.MaxConns = def.MaxConns
+	}
 	dbFilePath = resolveDBPath(sqlitePath)
-	openDb, err := gorm.Open(sqlite.New(sqlite.Config{DriverName: "sqlite", DSN: sqliteDSN(sqlitePath)}), &gorm.Config{
+	currentOptions = opts
+	currentMaxConns = opts.MaxConns
+	openDb, err := gorm.Open(sqlite.New(sqlite.Config{DriverName: "sqlite", DSN: sqliteDSNWithOptions(sqlitePath, opts)}), &gorm.Config{
 		Logger:                                   dbLogger,
 		DisableForeignKeyConstraintWhenMigrating: true,
 		SkipDefaultTransaction:                   true,
@@ -105,8 +171,8 @@ func Init(sqlitePath string) {
 	// 之前 MaxIdleConns=1 会导致并发高峰后连接被反复关闭重建，预编译语句缓存随之失效。
 	// SQLite 写是单写者，连接数过高无益于写吞吐，反而加剧写锁竞争与每连接页缓存内存占用；
 	// 8 个连接足够覆盖行情页并发读，索引生效后单条查询为毫秒级，8 连接可快速轮转。
-	dbCon.SetMaxIdleConns(dbMaxConns)
-	dbCon.SetMaxOpenConns(dbMaxConns)
+	dbCon.SetMaxIdleConns(currentMaxConns)
+	dbCon.SetMaxOpenConns(currentMaxConns)
 	// SQLite 为嵌入式库，连接无服务端状态可刷新，不设生命周期可避免
 	// 周期性换连接后 database/sql 内部按连接缓存的预编译语句全部作废重建
 	dbCon.SetConnMaxLifetime(0)
@@ -154,12 +220,12 @@ func Vacuum() (*VacuumResult, error) {
 		sqlDB.SetMaxIdleConns(0)
 		// 给在途查询留出归还连接的时间，否则该连接仍会挡住文件截断
 		time.Sleep(300 * time.Millisecond)
-		defer sqlDB.SetMaxIdleConns(dbMaxConns)
+		defer sqlDB.SetMaxIdleConns(currentMaxConns)
 	}
 
 	// 用独立连接执行，绕开 GORM 的预编译语句缓存：
 	// VACUUM 会重建整个库，连接上已缓存的语句会全部失效。
-	conn, err := sql.Open("sqlite", sqliteDSN(dbFilePath))
+	conn, err := sql.Open("sqlite", sqliteDSNWithOptions(dbFilePath, currentOptions))
 	if err != nil {
 		return nil, fmt.Errorf("打开数据库连接失败: %w", err)
 	}

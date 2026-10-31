@@ -1,0 +1,10 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.AiPanyi" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:statusBarColor">@color/ap_bg</item>
+        <item name="android:navigationBarColor">@color/ap_bg</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowBackground">@color/ap_bg</item>
+        <item name="android:windowSoftInputMode">adjustResize</item>
+        <item name="android:forceDarkAllowed" tools:targetApi="q">false</item>
+    </style>
+</resources>
