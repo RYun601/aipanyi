@@ -20,6 +20,9 @@ const reasoning = ref('')
 const cost = ref('')
 const volume = ref('')
 const showPosition = ref(false)
+const withPosition = ref(false)
+const positionOptions = ref([])
+const loadingPositions = ref(false)
 const showAlertEdit = ref(false)
 const editingAlert = ref(null)
 const showSuggestions = ref(false)
@@ -32,6 +35,18 @@ const alerts = computed(() => detail.value?.alerts || [])
 const savedAnalysis = computed(() => detail.value?.analysis || null)
 const displayAnalysis = computed(() => draft.value || savedAnalysis.value?.content || '')
 const canExtract = computed(() => !running.value && !!displayAnalysis.value.trim())
+const currentCode = computed(() => (item.value.code || props.code || '').toLowerCase())
+const selectedPositionCodes = computed(() =>
+  positionOptions.value.filter((p) => p.selected).map((p) => p.code)
+)
+const allSelected = computed({
+  get: () => positionOptions.value.length > 0 && positionOptions.value.every((p) => p.selected),
+  set: (v) => {
+    positionOptions.value.forEach((p) => {
+      p.selected = !!v
+    })
+  }
+})
 
 async function load() {
   loading.value = true
@@ -64,16 +79,52 @@ function onAnalysis(payload) {
 
 async function startAnalysis() {
   if (running.value) return
+  if (withPosition.value && selectedPositionCodes.value.length === 0) {
+    showToast('请选择至少一只持仓，或关闭持仓开关')
+    return
+  }
   running.value = true
   draft.value = ''
   reasoning.value = ''
   try {
-    await api.startAnalysis(props.code)
+    await api.startAnalysis(
+      props.code,
+      withPosition.value,
+      withPosition.value ? selectedPositionCodes.value : []
+    )
     showToast('AI 分析已开始')
   } catch (e) {
     running.value = false
     showToast(e?.message || '启动分析失败')
   }
+}
+
+async function loadPositionOptions() {
+  loadingPositions.value = true
+  try {
+    const list = await api.getWatchlist()
+    const positions = (Array.isArray(list) ? list : [])
+      .filter((x) => Number(x.costPrice) > 0 && Number(x.volume) > 0)
+      .map((x) => ({ ...x, selected: true }))
+    positionOptions.value = positions
+    if (!positions.length) {
+      withPosition.value = false
+      showToast('还没有配置成本/持仓的股票')
+    }
+  } catch (e) {
+    withPosition.value = false
+    showToast(e?.message || '读取持仓失败')
+  } finally {
+    loadingPositions.value = false
+  }
+}
+
+async function onWithPositionChange(v) {
+  if (!v) {
+    positionOptions.value = []
+    return
+  }
+  await loadPositionOptions()
 }
 
 async function cancelAnalysis() {
@@ -103,6 +154,7 @@ async function savePosition() {
     showToast(msg || '已保存')
     showPosition.value = false
     await load()
+    if (withPosition.value) await loadPositionOptions()
   } catch (e) {
     showToast(e?.message || '保存失败')
   }
@@ -186,6 +238,9 @@ watch(
   () => {
     draft.value = ''
     reasoning.value = ''
+    withPosition.value = false
+    positionOptions.value = []
+    loadingPositions.value = false
     load()
   }
 )
@@ -238,12 +293,70 @@ watch(
               <div class="muted">
                 <span v-if="running">正在分析，请稍候…</span>
                 <span v-else-if="savedAnalysis">上次 {{ savedAnalysis.createdAt }} · {{ savedAnalysis.modelName || 'AI' }}</span>
-                <span v-else>会带上成本价与持仓数量</span>
+                <span v-else>可选择是否带入持仓信息</span>
               </div>
             </div>
             <div class="row" style="gap: 6px">
               <van-button v-if="running" size="small" plain type="danger" @click="cancelAnalysis">取消</van-button>
               <van-button v-else size="small" type="primary" @click="startAnalysis">开始分析</van-button>
+            </div>
+          </div>
+
+          <div class="position-toggle">
+            <div class="row position-toggle-head">
+              <div>
+                <div class="position-toggle-title">带入持仓信息</div>
+                <div class="muted">默认关闭；开启后可选股票，把成本和持仓发送给 AI 做组合判断</div>
+              </div>
+              <van-switch
+                v-model="withPosition"
+                size="22px"
+                :disabled="running"
+                @update:model-value="onWithPositionChange"
+              />
+            </div>
+
+            <div v-if="withPosition" class="position-picker">
+              <div class="row position-picker-head">
+                <span class="muted">选择持仓（默认全选，仅列出已配置成本/持仓的股票）</span>
+                <van-checkbox
+                  v-if="positionOptions.length"
+                  v-model="allSelected"
+                  shape="square"
+                  icon-size="15px"
+                  :disabled="running"
+                >
+                  全选
+                </van-checkbox>
+              </div>
+              <div v-if="loadingPositions" class="muted" style="padding: 8px 0">正在读取持仓…</div>
+              <div v-else-if="!positionOptions.length" class="muted" style="padding: 8px 0">
+                还没有配置成本/持仓的股票，请先在自选股里设置。
+              </div>
+              <div
+                v-for="p in positionOptions"
+                :key="p.code"
+                class="position-row"
+                :class="{ current: p.code === currentCode }"
+              >
+                <div class="position-main">
+                  <div class="position-name">
+                    {{ p.name || p.code }}
+                    <span class="muted mono">{{ p.code }}</span>
+                    <van-tag v-if="p.code === currentCode" type="primary" plain size="mini">当前</van-tag>
+                  </div>
+                  <div class="muted position-meta">
+                    成本 {{ fmtPrice(p.costPrice) }} · 持仓 {{ p.volume }} 股
+                    <span v-if="p.costPrice > 0 && p.volume > 0" :class="changeClass(p.profitAmount)">
+                      · {{ fmtSignedMoney(p.profitAmount) }} ({{ fmtPercent(p.profitPercent) }})
+                    </span>
+                  </div>
+                </div>
+                <van-switch v-model="p.selected" size="20px" :disabled="running" />
+              </div>
+              <div class="muted" style="margin-top: 6px">
+                只把勾选的股票和成本/持仓发送给 AI；不含现金、未勾选股票。
+              </div>
             </div>
           </div>
 
@@ -311,7 +424,7 @@ watch(
       <div class="sheet">
         <div class="sheet-title">成本与持仓</div>
         <div class="muted" style="margin-bottom: 12px">
-          AI 分析会自动读取这里的成本价和持仓数量。
+          AI 分析不再默认读取；在 AI 分析卡片打开「带入持仓信息」并勾选后才会使用。
         </div>
         <van-cell-group inset style="margin: 0 0 12px">
           <van-field v-model="cost" type="number" label="成本价" placeholder="例如 12.30" input-align="right" />
@@ -337,3 +450,57 @@ watch(
     />
   </div>
 </template>
+
+<style scoped>
+.position-toggle {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--ap-line);
+}
+.position-toggle-head {
+  justify-content: space-between;
+  gap: 12px;
+}
+.position-toggle-title {
+  font-size: 15px;
+  font-weight: 650;
+}
+.position-picker {
+  margin-top: 10px;
+}
+.position-picker-head {
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 2px;
+}
+.position-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--ap-line);
+}
+.position-row.current {
+  background: var(--ap-primary-soft, rgba(25, 137, 250, 0.06));
+  margin: 0 -8px;
+  padding-left: 8px;
+  padding-right: 8px;
+  border-radius: 8px;
+}
+.position-main {
+  flex: 1;
+  min-width: 0;
+}
+.position-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.position-meta {
+  font-size: 12px;
+  margin-top: 2px;
+  line-height: 1.45;
+}
+</style>

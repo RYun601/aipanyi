@@ -65,7 +65,8 @@ export const api = {
   getStockDetail: (code) => call('GetStockDetail', code),
 
   // AI 分析
-  startAnalysis: (code) => call('StartAnalysis', code),
+  startAnalysis: (code, withPosition = false, positionCodes = []) =>
+    call('StartAnalysis', code, !!withPosition, Array.isArray(positionCodes) ? positionCodes : []),
   cancelAnalysis: () => call('CancelAnalysis'),
   getAnalysis: (code) => call('GetAnalysis', code),
   extractAlerts: (code) => call('ExtractAlerts', code),

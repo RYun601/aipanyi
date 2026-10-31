@@ -53,8 +53,8 @@ func (a *mobileApp) GetStockDetail(code string) (*stockDetailDTO, error) {
 
 // ---------------- AI 分析 ----------------
 
-func (a *mobileApp) StartAnalysis(code string) (string, error) {
-	return a.startAnalysis(code)
+func (a *mobileApp) StartAnalysis(code string, withPosition bool, positionCodes []string) (string, error) {
+	return a.startAnalysis(code, withPosition, positionCodes)
 }
 
 func (a *mobileApp) CancelAnalysis() {
