@@ -93,5 +93,6 @@ export const api = {
   saveSettings: (s) => call('SaveMobileSettings', s),
   getVersionInfo: () => call('GetVersionInfo'),
   getMonitorStatus: () => call('GetMonitorStatus'),
-  getDataSummary: () => call('GetDataSummary')
+  getDataSummary: () => call('GetDataSummary'),
+  sendTestNotification: () => call('SendTestNotification')
 }

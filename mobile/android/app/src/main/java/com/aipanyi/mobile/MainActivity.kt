@@ -2,11 +2,15 @@ package com.aipanyi.mobile
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import android.view.View
@@ -31,6 +35,13 @@ class MainActivity : AppCompatActivity() {
 
     private var baseUrl: String? = null
     private var pendingStockCode: String? = null
+    private var coreReceiver: BroadcastReceiver? = null
+    private val handler = Handler(Looper.getMainLooper())
+    private val coreTimeout = Runnable {
+        if (baseUrl == null) {
+            showError("本地服务启动失败：请确认通知权限/后台设置后点击重试")
+        }
+    }
 
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -51,8 +62,7 @@ class MainActivity : AppCompatActivity() {
 
         setupWebView()
         maybeRequestNotificationPermission()
-        startMonitorService()
-        startCoreAndLoad()
+        startMonitorServiceAndLoad()
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -106,28 +116,37 @@ class MainActivity : AppCompatActivity() {
         webView.webChromeClient = WebChromeClient()
     }
 
-    private fun startCoreAndLoad() {
+    private fun startMonitorServiceAndLoad() {
         errorView.visibility = View.GONE
         progress.visibility = View.VISIBLE
-        Thread {
-            try {
-                val url = mobilecore.Mobilecore.start(
-                    filesDir.absolutePath,
-                    AppNotifier(applicationContext)
-                )
-                baseUrl = url
-                getSharedPreferences(AppNotifier.PREFS, MODE_PRIVATE)
-                    .edit()
-                    .putString(AppNotifier.KEY_URL, url)
-                    .apply()
-                runOnUiThread { loadTarget() }
-            } catch (t: Throwable) {
-                Log.e(TAG, "start mobile core failed", t)
-                runOnUiThread {
-                    showError("本地服务启动失败：${t.message ?: t.javaClass.simpleName}\n点击重试")
-                }
+        registerCoreReceiver()
+        startMonitorService()
+        handler.removeCallbacks(coreTimeout)
+        handler.postDelayed(coreTimeout, 15000)
+    }
+
+    private fun registerCoreReceiver() {
+        if (coreReceiver != null) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context?, intent: Intent?) {
+                val url = intent?.getStringExtra(AppNotifier.KEY_URL)
+                if (!url.isNullOrBlank()) onCoreReady(url)
             }
-        }.start()
+        }
+        coreReceiver = receiver
+        ContextCompat.registerReceiver(
+            this,
+            receiver,
+            IntentFilter(AppNotifier.ACTION_CORE_READY),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+    }
+
+    private fun onCoreReady(url: String) {
+        if (baseUrl != null) return
+        baseUrl = url
+        handler.removeCallbacks(coreTimeout)
+        loadTarget()
     }
 
     private fun loadTarget() {
@@ -144,7 +163,7 @@ class MainActivity : AppCompatActivity() {
         webView.visibility = View.GONE
         errorView.text = message
         errorView.visibility = View.VISIBLE
-        errorView.setOnClickListener { startCoreAndLoad() }
+        errorView.setOnClickListener { startMonitorServiceAndLoad() }
     }
 
     private fun startMonitorService() {
@@ -266,6 +285,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(coreTimeout)
+        coreReceiver?.let {
+            try {
+                unregisterReceiver(it)
+            } catch (_: Throwable) {
+            }
+        }
+        coreReceiver = null
         if (this::webView.isInitialized) {
             webView.removeJavascriptInterface("AiPanyi")
             webView.destroy()

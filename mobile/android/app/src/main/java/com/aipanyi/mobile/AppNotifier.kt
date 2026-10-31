@@ -25,5 +25,6 @@ class AppNotifier(private val context: Context) : mobilecore.Notifier {
         const val PREFS = "aipanyi"
         const val KEY_ACTIVE = "active_alerts"
         const val KEY_URL = "local_url"
+        const val ACTION_CORE_READY = "com.aipanyi.mobile.CORE_READY"
     }
 }

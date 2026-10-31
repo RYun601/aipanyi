@@ -3,7 +3,9 @@ package mobilecore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -11,6 +13,13 @@ import (
 	"aipanyi/backend/events"
 	"aipanyi/backend/logger"
 )
+
+const defaultAnalysisSystemPrompt = `你是一位严谨的 A 股分析师，擅长把持仓成本、仓位和实时价格结合起来给出可执行的交易策略。
+要求：
+1. 只基于给定数据分析，不编造行情、财务或消息数据。
+2. 给出趋势判断、关键支撑/压力位、操作建议（买入/持有/减仓/止损）和风险提示。
+3. 涉及价格时给出明确数字或区间。
+4. 用中文 Markdown 输出，结构清晰。`
 
 func getAnalysis(code string) *analysisDTO {
 	norm := normalizeCode(code)
@@ -62,7 +71,11 @@ func (a *mobileApp) startAnalysis(code string) (string, error) {
 	a.analysisRunID = runID
 	a.analysisMu.Unlock()
 
-	go a.runAnalysis(ctx, runID, norm, f.Name, aiID, settings)
+	name := f.Name
+	if strings.TrimSpace(name) == "" {
+		name = stockDisplayName(norm)
+	}
+	go a.runAnalysis(ctx, runID, norm, name, aiID, settings)
 	return runID, nil
 }
 
@@ -85,6 +98,7 @@ func (a *mobileApp) finishAnalysis(runID string) {
 }
 
 func (a *mobileApp) runAnalysis(ctx context.Context, runID, code, name string, aiConfigID int64, settings mobileSettings) {
+	logger.SugaredLogger.Infof("runAnalysis entered: run=%s code=%s name=%s ai=%d", runID, code, name, aiConfigID)
 	defer a.finishAnalysis(runID)
 	defer func() {
 		if r := recover(); r != nil {
@@ -96,55 +110,40 @@ func (a *mobileApp) runAnalysis(ctx context.Context, runID, code, name string, a
 		}
 	}()
 
-	o := data.NewDeepSeekOpenAi(ctx, int(aiConfigID))
-	tools := []data.Tool{}
-	if settings.EnableTools {
-		tools = data.Tools(nil)
+	cfg, ok := findAIConfig(aiConfigID)
+	if !ok {
+		emitMobile("mobileAnalysis", map[string]any{
+			"runId": runID, "code": code, "done": true,
+			"error": "AI 配置不存在",
+		})
+		return
 	}
-	var sysPtr *int
-	if id := effectivePromptID(settings); id > 0 {
-		sysPtr = &id
-	}
+	logger.SugaredLogger.Infof("mobile analysis start: run=%s code=%s name=%s ai=%d model=%s", runID, code, name, aiConfigID, cfg.ModelName)
+	follow := data.NewStockDataApi().GetFollowedStockByStockCode(code)
+	logger.SugaredLogger.Infof("mobile analysis: follow cost=%.2f volume=%d storedPrice=%.2f", follow.CostPrice, follow.Volume, follow.Price)
+	price := quickPrice(code, follow.Price)
+	logger.SugaredLogger.Infof("mobile analysis: price=%.2f", price)
+	cost := follow.CostPrice
+	volume := follow.Volume
+	kline := quickKLine(code)
+	logger.SugaredLogger.Infof("mobile analysis: kline len=%d", len(kline))
+	repl := analysisTemplateReplacer(name, code, price, cost, volume)
+	systemPrompt := buildAnalysisSystemPrompt(settings, repl)
+	userPrompt := buildAnalysisUserPrompt(repl, buildAnalysisDataBlock(name, code, price, cost, volume), kline)
+	chatID := uuid.NewString()
 
-	msgs := o.NewChatStream(name, code, "", sysPtr, tools, settings.Thinking)
-	var content, reasoning strings.Builder
-	var chatID, question, errText string
-
-	for msg := range msgs {
-		if ctx.Err() != nil {
-			break
-		}
-		if isErrorMsg(msg) {
-			if v, ok := msg["content"].(string); ok && v != "" {
-				errText = v
-			}
-			continue
-		}
-		if v, ok := msg["content"].(string); ok && v != "" {
-			content.WriteString(v)
+	logger.SugaredLogger.Infof("mobile analysis: calling AI, prompt len=%d", len(userPrompt))
+	final, err := chatStream(ctx, cfg, systemPrompt, userPrompt, cfg.MaxTokens,
+		func(delta string) {
 			emitMobile("mobileAnalysis", map[string]any{
-				"runId": runID, "code": code, "delta": v,
+				"runId": runID, "code": code, "delta": delta,
 			})
-		}
-		if v, ok := msg["reasoning_content"].(string); ok && v != "" {
-			reasoning.WriteString(v)
+		},
+		func(reasoning string) {
 			emitMobile("mobileAnalysis", map[string]any{
-				"runId": runID, "code": code, "reasoning": v,
+				"runId": runID, "code": code, "reasoning": reasoning,
 			})
-		}
-		if v, ok := msg["extraContent"].(string); ok && v != "" {
-			content.WriteString(v)
-			emitMobile("mobileAnalysis", map[string]any{
-				"runId": runID, "code": code, "delta": v,
-			})
-		}
-		if v, ok := msg["chatId"].(string); ok && v != "" {
-			chatID = v
-		}
-		if v, ok := msg["question"].(string); ok && v != "" {
-			question = v
-		}
-	}
+		})
 
 	if ctx.Err() != nil {
 		emitMobile("mobileAnalysis", map[string]any{
@@ -152,21 +151,24 @@ func (a *mobileApp) runAnalysis(ctx context.Context, runID, code, name string, a
 		})
 		return
 	}
-
-	final := strings.TrimSpace(content.String())
+	logger.SugaredLogger.Infof("mobile analysis: AI done len=%d err=%v", len(final), err)
+	if err != nil {
+		logger.SugaredLogger.Errorf("mobile analysis failed: %v", err)
+		emitMobile("mobileAnalysis", map[string]any{
+			"runId": runID, "code": code, "done": true, "error": err.Error(),
+		})
+		return
+	}
+	final = strings.TrimSpace(final)
 	if final == "" {
-		msg := "AI 未返回内容，请检查 AI 配置或网络"
-		if errText != "" {
-			msg = errText
-		}
 		emitMobile("mobileAnalysis", map[string]any{
 			"runId": runID, "code": code, "done": true,
-			"error": msg,
+			"error": "AI 未返回内容，请检查 AI 配置或网络",
 		})
 		return
 	}
 
-	o.SaveAIResponseResult(code, name, final, chatID, question)
+	data.NewDeepSeekOpenAi(ctx, int(aiConfigID)).SaveAIResponseResult(code, name, final, chatID, userPrompt)
 	emitMobile("mobileAnalysis", map[string]any{
 		"runId": runID, "code": code, "done": true, "saved": true,
 	})
@@ -176,11 +178,7 @@ func (a *mobileApp) runAnalysis(ctx context.Context, runID, code, name string, a
 	if !settings.AutoExtractAlerts {
 		return
 	}
-	cfg, ok := findAIConfig(aiConfigID)
-	if !ok {
-		return
-	}
-	suggestions, err := extractAlertsWithConfig(code, name, final, mustPrice(code), cfg)
+	suggestions, err := extractAlertsWithConfig(code, name, final, price, cfg)
 	if err != nil {
 		logger.SugaredLogger.Warnf("mobile: extract alerts failed: %v", err)
 		emitMobile("mobileAlertSuggestions", map[string]any{
@@ -198,16 +196,124 @@ func emitMobile(event string, payload map[string]any) {
 	events.Emit(context.Background(), event, payload)
 }
 
-// isErrorMsg 判断 NewChatStream 推送的是错误帧（code=0），而不是正文。
-func isErrorMsg(msg map[string]any) bool {
-	switch v := msg["code"].(type) {
-	case int:
-		return v == 0
-	case int64:
-		return v == 0
-	case float64:
-		return v == 0
-	default:
-		return false
+// analysisTemplateReplacer 复用桌面端模板占位符的三种写法。
+func analysisTemplateReplacer(name, code string, price, cost float64, volume int64) *strings.Replacer {
+	costText := "未设置"
+	if cost > 0 {
+		costText = fmt.Sprintf("%.2f", cost)
+	}
+	volText := "未设置"
+	if volume > 0 {
+		volText = fmt.Sprintf("%d", volume)
+	}
+	priceText := "未知"
+	if price > 0 {
+		priceText = fmt.Sprintf("%.2f", price)
+	}
+	return strings.NewReplacer(
+		"{{stockName}}", name, "{stockName}", name, "stockName", name,
+		"{{stockCode}}", code, "{stockCode}", code, "stockCode", code,
+		"{{costPrice}}", costText, "{costPrice}", costText, "costPrice", costText,
+		"{{costVolume}}", volText, "{costVolume}", volText, "costVolume", volText,
+		"{{price}}", priceText, "{price}", priceText,
+	)
+}
+
+func buildAnalysisSystemPrompt(settings mobileSettings, repl *strings.Replacer) string {
+	if settings.DefaultPromptID > 0 {
+		if p := data.NewPromptTemplateApi().GetPromptTemplateByID(int(settings.DefaultPromptID)); strings.TrimSpace(p) != "" {
+			return repl.Replace(p)
+		}
+	}
+	if p := strings.TrimSpace(data.GetSettingConfig().Prompt); p != "" {
+		return repl.Replace(p)
+	}
+	return defaultAnalysisSystemPrompt
+}
+
+func buildAnalysisUserPrompt(repl *strings.Replacer, dataBlock, kline string) string {
+	question := strings.TrimSpace(data.GetSettingConfig().QuestionTemplate)
+	if question == "" {
+		question = "请结合当前价、成本价和持仓数量分析 {{stockName}}（{{stockCode}}）：\n" +
+			"1. 当前趋势与关键支撑/压力位；\n" +
+			"2. 结合我的成本和仓位，给出继续持有/加仓/减仓/止损的建议；\n" +
+			"3. 如果给出操盘策略，请明确触发价格和仓位。"
+	}
+	question = repl.Replace(question)
+	out := dataBlock + "\n\n" + question
+	if strings.TrimSpace(kline) != "" {
+		out += "\n\n近 30 日 K 线：\n" + kline
+	}
+	return out
+}
+
+func buildAnalysisDataBlock(name, code string, price, cost float64, volume int64) string {
+	priceText := "未知"
+	if price > 0 {
+		priceText = fmt.Sprintf("%.2f", price)
+	}
+	costText := "未设置"
+	if cost > 0 {
+		costText = fmt.Sprintf("%.2f", cost)
+	}
+	volText := "未设置"
+	if volume > 0 {
+		volText = fmt.Sprintf("%d", volume)
+	}
+	plText := "未设置"
+	if cost > 0 && volume > 0 && price > 0 {
+		amount := (price - cost) * float64(volume)
+		pct := (price/cost - 1) * 100
+		plText = fmt.Sprintf("%+.2f 元（%+.2f%%）", amount, pct)
+	}
+	return fmt.Sprintf("当前数据：\n- 股票：%s（%s）\n- 当前价：%s\n- 成本价：%s\n- 持仓数量：%s\n- 持仓盈亏：%s",
+		name, code, priceText, costText, volText, plText)
+}
+
+func quickPrice(code string, fallback float64) float64 {
+	ch := make(chan float64, 1)
+	go func() { ch <- mustPrice(code) }()
+	select {
+	case p := <-ch:
+		if p > 0 {
+			return p
+		}
+	case <-time.After(6 * time.Second):
+		logger.SugaredLogger.Warnf("mobile: quote timeout for %s, use stored price", code)
+	}
+	return fallback
+}
+
+func quickKLine(code string) string {
+	ch := make(chan string, 1)
+	go func() {
+		var rows *[]data.KLineData
+		if strings.HasPrefix(code, "hk") || strings.HasPrefix(code, "gb_") || strings.HasPrefix(code, "us") {
+			rows = data.NewStockDataApi().GetHK_KLineData(code, "day", 60)
+		} else {
+			rows = data.NewStockDataApi().GetKLineData(code, "240", 60)
+		}
+		if rows == nil || len(*rows) == 0 {
+			ch <- ""
+			return
+		}
+		list := *rows
+		start := 0
+		if len(list) > 30 {
+			start = len(list) - 30
+		}
+		var sb strings.Builder
+		sb.WriteString("|日期|开盘|最高|最低|收盘|成交量|\n|---|---|---|---|---|---|\n")
+		for _, k := range list[start:] {
+			sb.WriteString(fmt.Sprintf("|%s|%s|%s|%s|%s|%s|\n", k.Day, k.Open, k.High, k.Low, k.Close, k.Volume))
+		}
+		ch <- sb.String()
+	}()
+	select {
+	case s := <-ch:
+		return s
+	case <-time.After(8 * time.Second):
+		logger.SugaredLogger.Warnf("mobile: kline timeout for %s, continue without it", code)
+		return ""
 	}
 }

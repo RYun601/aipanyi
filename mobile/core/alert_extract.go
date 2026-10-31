@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"aipanyi/backend/data"
+	"aipanyi/backend/logger"
 	"aipanyi/mobile/alerts"
 )
 
@@ -14,7 +15,9 @@ const extractSystemPrompt = `你是一个交易策略结构化助手。你的任
 如果没有明确价格，输出 {"alerts":[]}。`
 
 func findAIConfig(id int64) (data.AIConfig, bool) {
+	logger.SugaredLogger.Infof("findAIConfig: id=%d", id)
 	configs := data.GetSettingConfig().AiConfigs
+	logger.SugaredLogger.Infof("findAIConfig: configs=%d", len(configs))
 	if len(configs) == 0 {
 		return data.AIConfig{}, false
 	}

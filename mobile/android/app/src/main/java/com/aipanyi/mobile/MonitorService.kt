@@ -18,6 +18,9 @@ import android.util.Log
 class MonitorService : Service() {
     private val notifier by lazy { AppNotifier(applicationContext) }
 
+    @Volatile
+    private var coreUrl: String? = null
+
     override fun onCreate() {
         super.onCreate()
         NotificationHelper.ensureChannels(this)
@@ -28,17 +31,34 @@ class MonitorService : Service() {
         Thread {
             try {
                 val url = mobilecore.Mobilecore.start(filesDir.absolutePath, notifier)
+                coreUrl = url
                 getSharedPreferences(AppNotifier.PREFS, MODE_PRIVATE)
                     .edit()
                     .putString(AppNotifier.KEY_URL, url)
-                    .apply()
+                    .commit()
+                sendCoreReady(url)
             } catch (t: Throwable) {
                 Log.e(TAG, "start mobile core failed", t)
             }
         }.start()
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Activity 可能在核心已启动后才重新打开；把当前地址再发一次，避免 WebView 等待超时。
+        coreUrl?.let { sendCoreReady(it) }
+        return START_STICKY
+    }
+
+    private fun sendCoreReady(url: String) {
+        try {
+            val ready = Intent(AppNotifier.ACTION_CORE_READY)
+                .setPackage(packageName)
+                .putExtra(AppNotifier.KEY_URL, url)
+            sendBroadcast(ready)
+        } catch (t: Throwable) {
+            Log.w(TAG, "send core ready failed", t)
+        }
+    }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         // 部分 ROM 划掉最近任务会连服务一起清；1 秒后用非精确闹钟尝试拉起。

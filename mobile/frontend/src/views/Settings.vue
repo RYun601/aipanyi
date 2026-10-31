@@ -90,6 +90,15 @@ function refreshNative() {
   nativeState.ignoringBattery = native.isIgnoringBatteryOptimizations()
 }
 
+async function sendTestNotification() {
+  try {
+    const msg = await api.sendTestNotification()
+    showToast(msg || '已发送')
+  } catch (e) {
+    showToast(e?.message || '发送失败')
+  }
+}
+
 async function saveSettings() {
   if (!settings.value) return
   try {
@@ -350,16 +359,6 @@ onMounted(load)
                 <van-switch v-model="settings.autoExtractAlerts" size="22px" />
               </template>
             </van-cell>
-            <van-cell title="启用工具调用" center>
-              <template #right-icon>
-                <van-switch v-model="settings.enableTools" size="22px" />
-              </template>
-            </van-cell>
-            <van-cell title="深度思考" center>
-              <template #right-icon>
-                <van-switch v-model="settings.thinking" size="22px" />
-              </template>
-            </van-cell>
             <van-cell title="发送系统通知" center>
               <template #right-icon>
                 <van-switch v-model="settings.pushEnabled" size="22px" />
@@ -395,6 +394,11 @@ onMounted(load)
               <van-button size="small" plain type="primary" @click="openBatterySettings">去设置</van-button>
             </template>
           </van-cell>
+          <van-cell title="测试通知" label="发一条价格提醒，检查通知权限和渠道" center>
+            <template #right-icon>
+              <van-button size="small" plain type="primary" @click="sendTestNotification">发送</van-button>
+            </template>
+          </van-cell>
           <van-cell title="应用启动管理" label="Honor/MagicOS 需要允许自启动与后台活动" center>
             <template #right-icon>
               <van-button size="small" plain type="primary" @click="openAutoStart">去设置</van-button>
@@ -402,7 +406,7 @@ onMounted(load)
           </van-cell>
           <div class="hint" style="margin-top: 10px">
             建议：设置 → 应用 → 应用启动管理 → AI盘译 → 手动管理，允许自启动、关联启动、后台活动；
-            最近任务里下拉锁定 App。即使这样，系统仍可能清理，无法保证 100% 准时。
+            App 已从最近任务隐藏，避免被划掉；从桌面图标或常驻通知打开。即使这样，系统仍可能清理，无法保证 100% 准时。
           </div>
           <van-button size="small" plain style="margin-top: 10px" @click="refreshNative">刷新状态</van-button>
         </template>

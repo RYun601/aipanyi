@@ -12,12 +12,12 @@ import (
 	"aipanyi/backend/models"
 	"aipanyi/backend/util"
 
+	"aipanyi/backend/events"
 	"github.com/duke-git/lancet/v2/convertor"
 	"github.com/duke-git/lancet/v2/mathutil"
 	"github.com/duke-git/lancet/v2/random"
 	"github.com/duke-git/lancet/v2/strutil"
 	"github.com/tidwall/gjson"
-	"aipanyi/backend/events"
 )
 
 // buildUserMessageContent 构造用户消息的 content。
@@ -465,12 +465,15 @@ func (o *OpenAi) NewChatStream(stock, stockCode, userQuestion string, sysPromptI
 		wg.Add(8)
 
 		var msgMu sync.Mutex
+		sealed := false
 		appendMsg := func(m ...map[string]interface{}) {
 			msgMu.Lock()
+			defer msgMu.Unlock()
+			if sealed {
+				return
+			}
 			msg = append(msg, m...)
-			msgMu.Unlock()
 		}
-
 
 		go func() {
 			defer wg.Done()
@@ -684,7 +687,22 @@ func (o *OpenAi) NewChatStream(stock, stockCode, userQuestion string, sysPromptI
 			})
 		}()
 
-		wg.Wait()
+		// 手机网络/部分数据源可能长时间不返回；最多等 20 秒，用已到的数据继续分析，
+		// 避免整个 AI 分析卡在 300 秒的 HTTP 超时上。
+		done := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(20 * time.Second):
+			logger.SugaredLogger.Warnf("NewChatStream: context fetch timeout, continue with partial data")
+		}
+		msgMu.Lock()
+		sealed = true
+		msg = append([]map[string]interface{}{}, msg...)
+		msgMu.Unlock()
 
 		msg = append(msg, map[string]interface{}{
 			"role":    "user",

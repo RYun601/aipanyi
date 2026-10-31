@@ -23,6 +23,7 @@ var tradingDayCache = freecache.NewCache(64 * 1024)
 
 // IsTradingDay 判断 A 股是否为交易日。
 func IsTradingDay(date time.Time) bool {
+	date = date.In(shanghai)
 	weekday := date.Weekday()
 	dateStr := date.Format("2006-01-02")
 
@@ -71,6 +72,7 @@ func checkHolidayAPI(date string) (isHoliday bool, apiOk bool) {
 
 // IsTradingTime 判断当前是否在 A 股交易时段（含 9:15 集合竞价）。
 func IsTradingTime(date time.Time) bool {
+	date = date.In(shanghai)
 	if !IsTradingDay(date) {
 		return false
 	}
@@ -88,6 +90,7 @@ func IsTradingTime(date time.Time) bool {
 
 // IsHKTradingTime 判断当前是否在港股交易时段。
 func IsHKTradingTime(date time.Time) bool {
+	date = date.In(shanghai)
 	if !isHKTradingDay(date) {
 		return false
 	}
@@ -110,6 +113,7 @@ func IsHKTradingTime(date time.Time) bool {
 }
 
 func isHKTradingDay(date time.Time) bool {
+	date = date.In(shanghai)
 	weekday := date.Weekday()
 	dateStr := date.Format("2006-01-02")
 

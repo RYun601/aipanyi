@@ -65,6 +65,16 @@ func (a *mobileApp) GetAnalysis(code string) *analysisDTO {
 	return getAnalysis(code)
 }
 
+// GetAnalysisStatus 供前端/调试查看当前分析任务状态。
+func (a *mobileApp) GetAnalysisStatus() map[string]any {
+	a.analysisMu.Lock()
+	defer a.analysisMu.Unlock()
+	return map[string]any{
+		"runId":   a.analysisRunID,
+		"running": a.analysisCancel != nil,
+	}
+}
+
 func (a *mobileApp) ExtractAlerts(code string) ([]alertSuggestionDTO, error) {
 	return extractAlerts(code)
 }
@@ -338,6 +348,16 @@ func (a *mobileApp) SaveMobileSettings(s mobileSettingsDTO) (string, error) {
 
 func (a *mobileApp) GetVersionInfo() versionDTO {
 	return versionDTO{Version: buildVersion}
+}
+
+// SendTestNotification 发一条测试价格提醒，供用户在系统设置里确认通知权限/渠道是否正常。
+func (a *mobileApp) SendTestNotification() string {
+	notifyDevice(
+		"【价格提醒】测试通知",
+		"现价 12.34，已跌破 12.50\n如果你看到这条通知，说明系统通知已打通",
+		"sh600519",
+	)
+	return "已发送测试通知"
 }
 
 // 便于排查：返回当前启用的提醒数量。

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 	// 内嵌 IANA 时区库：Android 各 ROM 的 /system/usr/share/zoneinfo 不保证完整，
 	// 美股交易时段判断需要 America/New_York。
 	_ "time/tzdata"
@@ -51,6 +52,11 @@ func Start(dataDir string, n Notifier) (string, error) {
 	}
 	if dataDir == "" {
 		return "", errors.New("dataDir 不能为空")
+	}
+	// Android 的 Go 进程默认可能是 UTC；不设置的话 time.Now() 会让 A 股交易时段判断整体偏移 8 小时。
+	// 本应用面向 A/HK/US 行情，统一把进程本地时区设为北京时间（美股判断内部会转纽约时间）。
+	if loc, err := time.LoadLocation("Asia/Shanghai"); err == nil {
+		time.Local = loc
 	}
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return "", fmt.Errorf("创建数据目录失败: %w", err)
