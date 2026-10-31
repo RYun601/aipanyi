@@ -174,12 +174,16 @@ type MobileSettings struct {
 
 ## 7. AI 分析
 
-- 复用 `data.NewDeepSeekOpenAi(...).NewChatStream(...)`，流式事件经 WS 推送。
+- 手机端使用轻量单次流式调用（`mobile/core/chat_stream.go`），输入为当前价、30 日 K 线、提示词；
+  不复用桌面 8 路数据源/工具（真机网络下会长时间卡住）。
 - 提示词模板：`MobileSettings.DefaultPromptID`；0 表示使用桌面全局提示词。
-- 成本/持仓注入：
-  - 现有 `{{costPrice}}` 保留。
-  - 新增 `{{costVolume}}`（持仓数量，股）。
-  - 未设置时注入“未设置”，避免模板出现裸占位符。
+- **持仓信息开关（默认关闭）**：
+  - 关闭：不注入任何成本/持仓/组合数据；提示词使用中性版本，并明确“未提供持仓信息”。
+  - 开启：列出所有 `CostPrice>0 && Volume>0` 的自选股，默认全选，逐只可关；只把勾选的股票传给 AI。
+  - 组合表：成本、持仓、现价、市值、盈亏、占组合市值；当前股票权重；注明不含现金、
+    未勾选/未配置持仓的股票，占比不代表总资产仓位。
+  - 当前股票未勾选：不注入当前股票成本，只给行情/K线 + 勾选的其他持仓。
+- `{{costPrice}}`/`{{costVolume}}` 占位符：未带入时填“未提供”；带入时填实际值。
 - 分析完成后服务端自动 `SaveAIResponseResult`，即使 WebView 被切走也不丢结果。
 - 同时只允许一个分析任务；支持取消。
 
@@ -217,7 +221,7 @@ type MobileSettings struct {
 
 AI 分析：
 
-- `StartAnalysis(code string) (string, error)`
+- `StartAnalysis(code string, withPosition bool, positionCodes []string) (string, error)`
 - `CancelAnalysis()`
 - `GetAnalysis(code string) *AnalysisDTO`
 - `ExtractAlerts(code string) ([]AlertSuggestionDTO, error)`
@@ -486,7 +490,7 @@ cd mobile/frontend && npm run build         # 移动端前端通过
 环境：Honor 50 NTH-AN00，MagicOS 8.0.0.221（Android 14），arm64；debug 侧载。
 产物：`mobilecore.aar` 12 MB；`app-debug.apk` 26.7 MiB；方便取用的副本
 `dist/aipanyi-android-0.1.0-debug.apk`，SHA256
-`42F8784DC3D44265BD6F986417A44685482F08CB6DBEAA63B54ED0A9C30B3346`。
+`AAC7A818047518742CCEA5119C5A84EEA6952BB88F7C3EA5327AC119BD51F201`。
 
 已通过：
 
@@ -495,9 +499,17 @@ cd mobile/frontend && npm run build         # 移动端前端通过
 - **价格提醒**：手动 below 1400 创建/开关/删除正常；AI 从真实分析中提取 9 条建议
   （1410/1390/1352/1330/1310/1288/1230/1450/1500），弹层勾选确认后写入 `source=ai`；
   测试后已清理，仅保留 1 条手写规则。
-- **AI 配置/真实分析**：使用临时 DeepSeek key（不写入仓库，测试后已从 App 删除配置），
-  `deepseek-chat` 官方接口；一次分析约 10.5 秒、输出 2650 字；正确引用成本/持仓和 30 日 K 线，
-  生成支撑/压力/仓位/止损策略；结果落库并在详情页 Markdown 渲染。
+- **AI 配置/真实分析**：上一轮用临时 DeepSeek key 完成过一次 `deepseek-chat` 真实分析
+  （约 10.5 秒、2650 字，含成本/持仓和 30 日 K 线）。本轮新增持仓开关后，临时 key 已失效
+  （DeepSeek 返回 401 Authentication Fails），未能再做真实模型验证；App 内该无效配置已删除，
+  key 未写入仓库。持仓开关/组合上下文已用本地假 AI 在真机上验证：
+  - 关闭：请求无成本/持仓/组合；
+  - 开启全选 3 只：请求包含 3 只组合表、当前股票成本和 49.91% 权重；
+  - 只选 2 只：请求中没有第 3 只；
+  - 当前股票不选：请求中没有当前股票成本，并注明“当前股票不在本次勾选组合中”；
+  - 全不选：前端提示“请选择至少一只持仓，或关闭持仓开关”并阻止启动；
+  - 分析中主开关/逐只开关/全选均禁用；重新进入详情页恢复默认关闭。
+  - 测试期间临时加的 000001/300750 持仓已删除，只保留 600519。
 - **时区**：修复前 Go 进程为 UTC，分析时间显示 03:xx，交易时段判断会整体偏 8 小时；
   `Start` 中设置 `time.Local=Asia/Shanghai`，并让 `marketcal` 显式转换北京时间后，
   日志/分析时间回到 11:xx。
@@ -532,6 +544,7 @@ cd mobile/frontend && npm run build         # 移动端前端通过
 
 ### 剩余待办
 
+- 用有效的 DeepSeek key 在真机补一次「持仓开关」真实模型分析（当前临时 key 已失效）。
 - 交易日实盘验证一次真实价格穿越通知。
 - Honor/MagicOS 上继续验证「隐藏最近任务 + 手动管理」后的长期存活；其他厂商 ROM 待测。
 - `mobile/core` 测试二进制的 Defender 误判问题（可用 CI/Linux 跑）。
