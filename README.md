@@ -2,9 +2,9 @@
 
 # AI盘译 (aipanyi)
 
-**基于大语言模型的 AI 赋能股票分析工具**
+**基于大语言模型的本地股票分析工具**
 
-Go + Wails + Vue3/NaiveUI ｜ 本地优先 · 本地存储 · 桌面原生窗口
+Go + Wails + Vue 3 + Naive UI ｜ 本地优先 · 本地存储 · 桌面原生窗口
 
 [![GitHub Release](https://img.shields.io/github/v/release/RYun601/aipanyi?link=https%3A%2F%2Fgithub.com%2FRYun601%2Faipanyi%2Freleases)](https://github.com/RYun601/aipanyi/releases)
 [![GitHub Repo stars](https://img.shields.io/github/stars/RYun601/aipanyi?style=social)](https://github.com/RYun601/aipanyi)
@@ -14,122 +14,119 @@ Go + Wails + Vue3/NaiveUI ｜ 本地优先 · 本地存储 · 桌面原生窗口
 
 ---
 
-## 📖 这个项目是什么
+## 项目简介
 
-AI盘译是一个跑在你自己电脑上的股票分析工具。它把行情、K 线、资金流、龙虎榜、政策新闻等数据，
-和一个可调用 120+ 数据工具的 AI 智能体接在一起——你用大白话提问，它自己决定调哪些接口、看图、算指标，
-最后给你一份带图的分析。
+AI盘译是一款本地运行的股票分析工具。该工具整合行情、K 线、资金流、龙虎榜、政策新闻等数据，并接入可调用 120+ 数据工具的 AI 智能体。用户以自然语言提出分析需求，模型据此选择数据接口，结合图表与指标完成分析，最终输出包含图表的分析报告。
 
-三条设计底线：
+三条设计原则：
 
-1. **本地优先**。所有行情缓存、AI 配置、提示词模板、知识库都存在你本机的 SQLite / 本地文件里，不上云；AI 请求只发往你配置的模型服务。
-2. **桌面原生窗口**。基于 Wails，启动后直接打开应用窗口，桌面 UI 不依赖浏览器；窗口可自由缩放。
-3. **功能不设锁**。
+1. **本地优先**：行情缓存、AI 配置、提示词模板与知识库均存储于本机 SQLite 或本地文件，不进行云端同步；AI 请求仅发送至用户配置的模型服务。
+2. **桌面原生窗口**：基于 Wails 构建，启动后直接打开桌面窗口，不依赖系统浏览器，窗口支持自由缩放。
+3. **功能完整**：所有功能均可在本地使用。
 
-> 本项目是 [go-stock](https://github.com/ArvinLovegood/go-stock)（GNU GPLv3）的衍生版本，
-> 依据 GPLv3 义务开源全部修改。详见 [License](#-license) 与 [致谢](#-致谢)。
+> 本项目为 [go-stock](https://github.com/ArvinLovegood/go-stock)（GNU GPLv3）的衍生版本，依据 GPLv3 要求公开全部修改。详见 [许可证](#许可证) 与 [致谢](#致谢)。
 
 ---
 
-## ✨ 功能一览
+## 功能概览
 
 **AI 分析**
-- 内置 AI 智能体，支持 React / PlanExecute / DeepAgents 三种模式
-- 120+ AI 数据工具：行情、K 线、分时、分笔、资金流、龙虎榜、概念板块、财务报告、政策新闻、节假日、问财自然语言选股……
-- 桌面 AI 分析可选是否带入持仓：默认关闭；开启后只传勾选的自选股成本/组合，当前股票未勾选时不提供其成本。
-- 视觉理解：截图问股、K 线图分析、图片上传/粘贴/URL 多方式输入
-- 多轮对话、对话摘要、长期记忆、用户画像学习、知识库（chromem-go 向量库）
-- 技能系统（Skill）：ZIP 技能包导入、在线编辑、渐进式提示词注入
-- MCP 扩展：MCP 服务器管理、OAuth 2.1 授权、DeepAgents 模式下工具按需检索
+
+- 内置 AI 智能体，支持 React / PlanExecute / DeepAgents 三种模式。
+- 120+ AI 数据工具，覆盖行情、K 线、分时、分笔、资金流、龙虎榜、概念板块、财务报告、政策新闻、节假日及问财自然语言选股等。
+- 桌面端 AI 分析支持可选的持仓上下文：默认关闭；开启后仅传入所选自选股的成本与组合，当前股票未选中时不提供其成本。
+- 视觉理解：支持截图、K 线图、图片上传、粘贴及 URL 输入。
+- 多轮对话、对话摘要、长期记忆、用户画像学习及知识库（chromem-go 向量库）。
+- 技能系统（Skill）：支持 ZIP 技能包导入、在线编辑与渐进式提示词注入。
+- MCP 扩展：支持 MCP 服务器管理、OAuth 2.1 授权，以及 DeepAgents 模式下的工具按需检索。
 
 **行情与图表**
-- A股 / 港股 / 美股 / 场内 ETF
-- K 线分析：复权切换、波浪理论、测量画框、13 种绘图工具、成交量分布 VPVR、神奇九转、自动背离（RSI/MACD/KDJ）、BBI、涨跌停价位线、威斯波浪
-- 分时、分笔成交、集合竞价、个股资金流向、通达信 MAC 协议
--  lightweight-charts 多周期K线 + ECharts 指标图，窗口缩放自动重排
+
+- 支持 A 股、港股、美股及场内 ETF。
+- K 线分析：复权切换、波浪理论、测量画框、13 种绘图工具、成交量分布 VPVR、神奇九转、自动背离（RSI/MACD/KDJ）、BBI、涨跌停价位线、威斯波浪。
+- 分时、分笔成交、集合竞价、个股资金流向及通达信 MAC 协议。
+- 基于 lightweight-charts 的多周期 K 线图与 ECharts 指标图，窗口缩放时自动重排。
 
 **监控与推送**
-- 后台买卖点信号监控（9 路共振 / TEMA 转折），最小化也持续提醒，支持语音播报股票名称
-- 信号流水、收益统计（买点开仓/卖点平仓，多区间）
-- 飞书 / 钉钉机器人推送，飞书 AI 运行进度卡片
-- 定时预警、异动监控、涨停梯队
+
+- 后台买卖点信号监控（9 路共振 / TEMA 转折），窗口最小化时持续运行，支持语音播报股票名称。
+- 信号流水与收益统计（买点开仓、卖点平仓，支持多区间）。
+- 飞书 / 钉钉机器人推送，飞书 AI 运行进度卡片。
+- 定时预警、异动监控、涨停梯队。
 
 **复盘策略**
-- 每日复盘、盘前策略（AI 生成，交易日定时执行）
-- 提示词模板回测：历史行情重放 + 防未来数据，胜率/回撤/夏普/Jaccard 稳定性多维对比
-- 推荐回测统计：按持有期核算实际收益并与沪深300对比
-- 交易日志、每日操作计划
+
+- 每日复盘与盘前策略（AI 生成，交易日定时执行）。
+- 提示词模板回测：历史行情重放、避免未来数据，支持胜率、回撤、夏普比率、Jaccard 稳定性等多维对比。
+- 推荐回测统计：按持有期核算实际收益，并与沪深 300 指数对比。
+- 交易日志、每日操作计划。
 
 **AI 模型服务**
-OpenAI 兼容接口 / Ollama / LMStudio / AnythingLLM / DeepSeek / 智谱 / 豆包 / 阿里百炼 / Moonshot / 混元 / 讯飞星火 / MiniMax / 小米 MiMo / 硅基流动等聚合平台
+
+支持 OpenAI 兼容接口、Ollama、LMStudio、AnythingLLM、DeepSeek、智谱、豆包、阿里百炼、Moonshot、混元、讯飞星火、MiniMax、小米 MiMo、硅基流动等平台。
 
 ---
 
-## 📱 Android 手机端（实验，已提供安装包）
+## Android 客户端（实验性）
 
-仓库内包含 `mobile/` 独立 Android 客户端，面向手机上的轻量使用场景：
+仓库内包含独立的 Android 客户端（`mobile/`），面向移动端轻量使用场景：
 
-- 自选、成本/持仓、AI 分析（可选是否带入持仓/组合，默认关闭，开启后逐只选择）、
-  AI 配置与系统提示词、价格触发提醒（30 秒轮询）
-- 数据保存在手机本地 SQLite，不上云；AI 请求直达你配置的模型服务
-- 当前为 **debug 签名、arm64-v8a** 安装包，随 Release 提供：
-  `aipanyi-android-0.1.0-debug.apk`。桌面三平台由 CI 自动构建，Android APK 目前由本地脚本构建后手动上传。
-- 构建与 Honor/MagicOS 设置见 [`mobile/android/README.md`](mobile/android/README.md)
-- 设计与真机验收记录见
-  [`docs/plan/2026-10-29-android-price-alert-mvp.md`](docs/plan/2026-10-29-android-price-alert-mvp.md)
+- 支持自选、成本/持仓、AI 分析（可选持仓上下文，默认关闭，开启后逐只选择）、AI 配置与系统提示词、价格触发提醒（30 秒轮询）。
+- 数据存储于手机本地 SQLite，不使用云端存储；AI 请求仅发送至用户配置的模型服务。
+- 当前提供 debug 签名、arm64-v8a 安装包，随 Release 发布：`aipanyi-android-0.1.0-debug.apk`。桌面三平台由 CI 自动构建，Android APK 当前由本地脚本构建后手动上传。
+- 构建与 Honor/MagicOS 配置见 [`mobile/android/README.md`](mobile/android/README.md)。
+- 设计与真机验收记录见 [`docs/plan/2026-10-29-android-price-alert-mvp.md`](docs/plan/2026-10-29-android-price-alert-mvp.md)。
 
-> 手机端不包含桌面的 K 线、回测、MCP 等重功能。Honor/MagicOS 需要允许自启动/后台活动、
-> 关闭电池优化；App 已从最近任务隐藏，避免被划掉，从桌面/通知打开；重启后请重新打开一次 App 恢复监控。
+> Android 客户端不包含桌面端的 K 线、回测、MCP 等功能。Honor/MagicOS 需允许自启动与后台活动，并关闭电池优化；应用已从最近任务列表隐藏，以降低被系统清理的概率；设备重启后需重新打开应用以恢复监控。
 
 ---
 
-## 🚀 快速开始
+## 快速开始
 
-### 下载即用
+### 下载与安装
 
-到 [Releases](https://github.com/RYun601/aipanyi/releases) 下载对应平台的文件：
+请前往 [Releases](https://github.com/RYun601/aipanyi/releases) 下载对应平台的文件：
 
 | 平台 | 文件 |
 | --- | --- |
 | Windows x64 | `aipanyi-windows-amd64.exe` |
 | Windows ARM64 | `aipanyi-windows-arm64.exe` |
-| macOS（Intel + Apple Silicon 通用） | `aipanyi-darwin-universal.zip` |
-| Android arm64-v8a | `aipanyi-android-0.1.0-debug.apk`（debug 安装包，手动安装） |
+| macOS（Intel 与 Apple Silicon 通用） | `aipanyi-darwin-universal.zip` |
+| Android arm64-v8a | `aipanyi-android-0.1.0-debug.apk`（debug 签名，手动安装） |
 
-**绿色版，免安装**：Windows 是单个 exe，双击即用，没有安装程序、也不写注册表；macOS 是 zip，解压得到 `.app`。
-Linux 版目前不在 CI 发布范围内，需要自行构建，见 [`docs/BUILD_LINUX.md`](docs/BUILD_LINUX.md)。
-Android APK 为 debug 签名、arm64-v8a，手动安装前需要在系统设置中允许安装未知来源应用。
+Windows 提供单个可执行文件，下载后可直接运行，无需安装程序，不写入注册表。macOS 提供 zip 压缩包，解压后得到 `.app`。Linux 版本当前不在 CI 发布范围内，需自行构建，参见 [`docs/BUILD_LINUX.md`](docs/BUILD_LINUX.md)。
 
-首次启动后：
+Android APK 为 debug 签名、arm64-v8a，手动安装前需在系统设置中允许安装未知来源应用。
 
-1. 打开应用窗口（Wails 桌面原生窗口，大小自适应屏幕分辨率）
-2. 进入「设置」填入你的 AI 服务 API Key（没有 Key 也可以用 Ollama 跑本地模型）
-3. 输入股票代码或名称，开始提问
+首次启动：
 
-首次启动会自动初始化 A 股/港股/美股基础数据，网络较慢时请耐心等待，不要连续重复打开程序。
+1. 启动应用，打开桌面窗口（窗口大小自适应屏幕分辨率）。
+2. 在「设置」中配置 AI 服务 API Key；如使用 Ollama 本地模型，可不填写外部服务 Key。
+3. 输入股票代码或名称，开始分析。
 
-> **Windows 用户请注意**：先新建一个专属文件夹（例如 `D:\AI盘译`），把 exe 放进去，并从该文件夹启动/双击。
-> 程序的数据（`data\stock.db`、日志、缓存）生成在**启动时的工作目录**（通常就是 exe 所在目录）。
-> 之后不要换目录启动——换目录等于换一套空白数据，自选股和设置会“消失”。升级时用新 exe 覆盖旧的即可，数据保留。
+首次启动会自动初始化 A 股、港股与美股基础数据；网络较慢时请耐心等待，避免重复启动程序。
 
-> **首次运行的安全提示**：本项目的可执行文件**没有代码签名证书**，因此从网络下载后首次运行可能遇到：
+> **Windows 使用说明**：建议新建独立目录（例如 `D:\AI盘译`），将可执行文件放入后从该目录启动。
+> 程序数据（`data\stock.db`、日志及缓存）生成于**启动时的工作目录**（通常为可执行文件所在目录）。
+> 更换工作目录会创建新的数据目录，原有自选股与设置不会自动迁移。升级时可替换可执行文件，数据目录保持不变。
+
+> **首次运行安全说明**：本项目未使用代码签名证书，首次运行可能触发以下提示：
 >
-> - Windows SmartScreen 提示「Windows 已保护你的电脑」→ 点「更多信息」→「仍要运行」
-> - 个别杀毒软件 / 安全卫士误报 → 加入信任区即可（未签名的新程序容易被误判）
-> - macOS 提示「无法验证开发者」→ 处理办法见 [RUN_MACOS_TERMINAL.md](docs/RUN_MACOS_TERMINAL.md)
+> - Windows SmartScreen 提示「Windows 已保护你的电脑」→ 选择「更多信息」→「仍要运行」。
+> - 部分安全软件可能误报 → 将程序加入信任列表；未签名程序较易被误判。
+> - macOS 提示「无法验证开发者」→ 处理办法见 [RUN_MACOS_TERMINAL.md](docs/RUN_MACOS_TERMINAL.md)。
 >
-> 想确认文件没被篡改：在 [Releases](https://github.com/RYun601/aipanyi/releases) 对应版本里找到 `SHA256SUMS.txt`，
-> 本地算一遍比对：
+> 如需校验文件完整性，请在对应版本的 Release 中下载 `SHA256SUMS.txt`，计算本地文件的 SHA-256 后比对：
 >
 > ```powershell
 > Get-FileHash .\aipanyi-windows-amd64.exe -Algorithm SHA256
 > ```
 >
-> ⚠️ **只从本仓库的 Releases 页面下载**，第三方站点转发的同名文件无法保证安全。
+> 请仅从本仓库 Releases 页面下载；第三方站点转发的文件无法保证安全。
 
-### 从源码构建
+### 源码构建
 
-环境要求：Go **1.27+**、Node.js 22+、Wails CLI v2.15.0
+环境要求：Go 1.27+、Node.js 22+、Wails CLI v2.15.0。
 
 ```bash
 git clone https://github.com/RYun601/aipanyi.git
@@ -138,33 +135,29 @@ cd aipanyi
 # 0. 安装 Wails CLI（一次性）
 go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
 
-# 1. 构建前端（wails build 也会自动跑一遍）
+# 1. 构建前端（wails build 也会自动执行）
 cd frontend && npm install && npm run build && cd ..
 
-# 2. 桌面构建（Wails 原生窗口，默认且唯一 UI 形态）
+# 2. 桌面构建（Wails 原生窗口，唯一 UI 形态）
 wails build -platform windows/amd64 -o aipanyi
 ```
 
-> ⚠️ `-o aipanyi` **不会自动补 `.exe`**：Windows 上产物是 `build/bin/aipanyi`（无扩展名），
-> 自行 `Copy-Item build/bin/aipanyi build/bin/aipanyi.exe` 即可。
-> 也不要用 `go build` 代替 `wails build` —— 拿不到 Wails 运行时，前端产物也不保证被打包进去。
+> `-o aipanyi` 不会自动添加 `.exe` 扩展名；Windows 产物为 `build/bin/aipanyi`。如需 `.exe`，可执行 `Copy-Item build/bin/aipanyi build/bin/aipanyi.exe`。
+> 请勿使用 `go build` 替代 `wails build`：后者才能打包前端产物并提供 Wails 运行时。
 
-> 数据目录 `data/` 相对于**启动时的工作目录**。从仓库根目录启动会读取 `F:\aipanyi\data`；
-> 直接运行 `build/bin/aipanyi` 会使用 `build/bin/data`，不会自动读取仓库根目录的数据。
-> 迁移或升级时请把整个 `data/` 目录一起带上。
+> 数据目录 `data/` 相对于**启动时的工作目录**。从仓库根目录启动时读取 `F:\aipanyi\data`；直接运行 `build/bin/aipanyi` 时使用 `build/bin/data`，不会自动读取仓库根目录的数据。迁移或升级时请一并保留 `data/` 目录。
 
-桌面端使用 Wails 原生窗口；浏览器网页版模式已移除，详见
-[ADR-002](docs/ADR-002-移除桌面网页版模式.md)。`webserver` 包仅保留给 Android 端本地界面使用。
+桌面端使用 Wails 原生窗口；浏览器网页版模式已移除，详见 [ADR-002](docs/ADR-002-移除桌面网页版模式.md)。`webserver` 包仅保留给 Android 客户端本地界面使用。
 
-更多细节见 [`docs/快速开始指南.md`](docs/快速开始指南.md) 与 [`docs/BUILD_LINUX.md`](docs/BUILD_LINUX.md)。
+更多说明见 [`docs/快速开始指南.md`](docs/快速开始指南.md) 与 [`docs/BUILD_LINUX.md`](docs/BUILD_LINUX.md)。
 
 ---
 
-## 💖 免费与赞助
+## 许可与赞助
 
-全部功能免费，二进制内没有功能锁；赞助不附带任何功能。
+全部功能免费；赞助不附带任何功能。
 
-如果你觉得它有用，欢迎自愿赞助：
+如本项目对你有帮助，欢迎自愿赞助：
 
 <div align="center">
 
@@ -174,18 +167,16 @@ wails build -platform windows/amd64 -o aipanyi
 
 ---
 
-## ⚠️ 数据来源与免责声明
+## 数据来源与免责声明
 
 - 行情与新闻数据来自东方财富、新浪财经、财联社、问财、通达信等公开接口。
-- 这些接口大多**禁止商业用途的批量抓取**，本项目按"个人学习研究"场景使用并如实披露来源。
-- 数据可能延迟、缺失或出错，**不构成任何投资建议**。
-- AI 的分析结果是模型生成内容，可能幻觉、可能过时。投资有风险，决策请自负。
+- 上述接口通常禁止商业用途的批量抓取；本项目仅用于个人学习研究，并披露数据来源。
+- 数据可能存在延迟、缺失或错误；AI 生成内容可能存在错误或过时。相关内容均不构成投资建议，投资决策及风险由用户自行承担。
 - 本项目仅供学习研究使用。
 
 ---
 
-
-## 📚 文档
+## 文档
 
 - [小白入门使用手册（零基础）](docs/小白入门使用手册.md)
 - [小白设置页面使用说明](docs/小白设置页面使用说明.md)
@@ -200,15 +191,13 @@ wails build -platform windows/amd64 -o aipanyi
 
 ---
 
-## 🤖 给 AI 助手 / 贡献者
+## 面向 AI 助手与贡献者
 
-本仓库带 [`AGENTS.md`](AGENTS.md)，规定了构建验证命令、分支与提交规范、
-发版纪律（**修改说明必须手写，禁用 GitHub 自动生成 release notes**）、以及代码约定。
-AI 编码助手在动手前应先读它。
+本仓库包含 [`AGENTS.md`](AGENTS.md)，其中规定构建与验证命令、分支与提交规范、发版纪律（修改说明必须手写，禁止使用 GitHub 自动生成 release notes）及代码约定。AI 编码助手在修改代码前应先阅读该文件。
 
 ---
 
-## 🦄 致谢
+## 致谢
 
 本项目基于以下开源项目构建：
 
@@ -222,7 +211,7 @@ AI 编码助手在动手前应先读它。
 
 ---
 
-## ⭐ Star History
+## Star 趋势
 
 <a href="https://www.star-history.com/?repos=RYun601%2Faipanyi&type=date&legend=top-left">
   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=RYun601/aipanyi&type=date&legend=top-left" />
@@ -230,10 +219,8 @@ AI 编码助手在动手前应先读它。
 
 ---
 
-## 📄 License
+## 许可证
 
 [GNU GPLv3](LICENSE)
 
-本项目是 go-stock 的衍生作品，依据 GNU General Public License v3.0 发布。
-你可以自由使用、研究、修改和再分发本项目的全部源码（包括本 fork 的所有修改），
-但必须同样以 GPLv3 授权你的衍生版本，并保留原始版权声明与修改标注。
+本项目为 go-stock 的衍生作品，依据 GNU General Public License v3.0 发布。你可以自由使用、研究、修改和再分发本项目的全部源码（包括本衍生版本的全部修改），但需同样以 GPLv3 授权你的衍生版本，并保留原始版权声明与修改标注。
