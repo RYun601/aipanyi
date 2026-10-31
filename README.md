@@ -4,7 +4,7 @@
 
 **基于大语言模型的 AI 赋能股票分析工具**
 
-Go + Wails + Vue3/NaiveUI ｜ 本地优先 · 数据不出本机 · 浏览器即界面
+Go + Wails + Vue3/NaiveUI ｜ 本地优先 · 本地存储 · 桌面原生窗口
 
 [![GitHub Release](https://img.shields.io/github/v/release/RYun601/aipanyi?link=https%3A%2F%2Fgithub.com%2FRYun601%2Faipanyi%2Freleases)](https://github.com/RYun601/aipanyi/releases)
 [![GitHub Repo stars](https://img.shields.io/github/stars/RYun601/aipanyi?style=social)](https://github.com/RYun601/aipanyi)
@@ -17,16 +17,16 @@ Go + Wails + Vue3/NaiveUI ｜ 本地优先 · 数据不出本机 · 浏览器即
 ## 📖 这个项目是什么
 
 AI盘译是一个跑在你自己电脑上的股票分析工具。它把行情、K 线、资金流、龙虎榜、政策新闻等数据，
-和一个可调用 150+ 数据工具的 AI 智能体接在一起——你用大白话提问，它自己决定调哪些接口、看图、算指标，
+和一个可调用 120+ 数据工具的 AI 智能体接在一起——你用大白话提问，它自己决定调哪些接口、看图、算指标，
 最后给你一份带图的分析。
 
 三条设计底线：
 
-1. **本地优先**。所有行情缓存、AI 配置、提示词模板、知识库都存在你本机的 SQLite / 本地文件里，不上云。
-2. **界面就是浏览器**。启动后自动打开系统默认浏览器访问本地服务，不再弹一个桌面窗口——小屏、分屏、多显示器都不会被裁切。
+1. **本地优先**。所有行情缓存、AI 配置、提示词模板、知识库都存在你本机的 SQLite / 本地文件里，不上云；AI 请求只发往你配置的模型服务。
+2. **桌面原生窗口**。基于 Wails，启动后直接打开应用窗口，桌面 UI 不依赖浏览器；窗口可自由缩放。
 3. **功能不设锁**。见下文「关于收费」。
 
-> 本项目是 [AI盘译](https://github.com/ArvinLovegood/go-stock)（GNU GPLv3）的衍生版本，
+> 本项目是 [go-stock](https://github.com/ArvinLovegood/go-stock)（GNU GPLv3）的衍生版本，
 > 依据 GPLv3 义务开源全部修改。详见 [License](#-license) 与 [致谢](#-致谢)。
 
 ---
@@ -35,7 +35,8 @@ AI盘译是一个跑在你自己电脑上的股票分析工具。它把行情、
 
 **AI 分析**
 - 内置 AI 智能体，支持 React / PlanExecute / DeepAgents 三种模式
-- 150+ AI 数据工具：行情、K 线、分时、分笔、资金流、龙虎榜、概念板块、财务报告、政策新闻、节假日、问财自然语言选股……
+- 120+ AI 数据工具：行情、K 线、分时、分笔、资金流、龙虎榜、概念板块、财务报告、政策新闻、节假日、问财自然语言选股……
+- 桌面 AI 分析可选是否带入持仓：默认关闭；开启后只传勾选的自选股成本/组合，当前股票未勾选时不提供其成本。
 - 视觉理解：截图问股、K 线图分析、图片上传/粘贴/URL 多方式输入
 - 多轮对话、对话摘要、长期记忆、用户画像学习、知识库（chromem-go 向量库）
 - 技能系统（Skill）：ZIP 技能包导入、在线编辑、渐进式提示词注入
@@ -59,20 +60,21 @@ AI盘译是一个跑在你自己电脑上的股票分析工具。它把行情、
 - 推荐回测统计：按持有期核算实际收益并与沪深300对比
 - 交易日志、每日操作计划
 
-**数据源**
+**AI 模型服务**
 OpenAI 兼容接口 / Ollama / LMStudio / AnythingLLM / DeepSeek / 智谱 / 豆包 / 阿里百炼 / Moonshot / 混元 / 讯飞星火 / MiniMax / 小米 MiMo / 硅基流动等聚合平台
 
 ---
 
-## 📱 Android 手机端（实验）
+## 📱 Android 手机端（实验，已提供侧载包）
 
-仓库内新增 `mobile/` 独立 Android 客户端，面向手机上的轻量使用场景：
+仓库内包含 `mobile/` 独立 Android 客户端，面向手机上的轻量使用场景：
 
 - 自选、成本/持仓、AI 分析（可选是否带入持仓/组合，默认关闭，开启后逐只选择）、
   AI 配置与系统提示词、价格触发提醒（30 秒轮询）
 - 数据保存在手机本地 SQLite，不上云；AI 请求直达你配置的模型服务
-- 当前为 debug 侧载版，未纳入 CI 发布；构建与 Honor/MagicOS 设置见
-  [`mobile/android/README.md`](mobile/android/README.md)
+- 当前为 **debug 签名、arm64-v8a** 侧载版，安装包随 Release 提供：
+  `aipanyi-android-0.1.0-debug.apk`。桌面三平台由 CI 自动构建，Android APK 目前由本地脚本构建后手动上传。
+- 构建与 Honor/MagicOS 设置见 [`mobile/android/README.md`](mobile/android/README.md)
 - 设计与真机验收记录见
   [`docs/plan/2026-10-29-android-price-alert-mvp.md`](docs/plan/2026-10-29-android-price-alert-mvp.md)
 
@@ -92,21 +94,23 @@ OpenAI 兼容接口 / Ollama / LMStudio / AnythingLLM / DeepSeek / 智谱 / 豆�
 | Windows x64 | `aipanyi-windows-amd64.exe` |
 | Windows ARM64 | `aipanyi-windows-arm64.exe` |
 | macOS（Intel + Apple Silicon 通用） | `aipanyi-darwin-universal.zip` |
+| Android arm64-v8a | `aipanyi-android-0.1.0-debug.apk`（debug 侧载） |
 
 **绿色版，免安装**：Windows 是单个 exe，双击即用，没有安装程序、也不写注册表；macOS 是 zip，解压得到 `.app`。
 Linux 版目前不在 CI 发布范围内，需要自行构建，见 [`docs/BUILD_LINUX.md`](docs/BUILD_LINUX.md)。
+Android APK 为 debug 签名、arm64-v8a，旁路安装前需要在系统设置中允许安装未知来源应用。
 
 首次启动后：
 
-1. 打开应用窗口（桌面模式为原生窗口，大小自适应屏幕分辨率）
+1. 打开应用窗口（Wails 桌面原生窗口，大小自适应屏幕分辨率）
 2. 进入「设置」填入你的 AI 服务 API Key（没有 Key 也可以用 Ollama 跑本地模型）
 3. 输入股票代码或名称，开始提问
 
 首次启动会自动初始化 A 股/港股/美股基础数据，网络较慢时请耐心等待，不要连续重复打开程序。
 
-> **Windows 用户请注意**：先新建一个专属文件夹（例如 `D:\AI盘译`），把 exe 放进去再双击运行。
-> 程序的数据（`data\stock.db`、日志、缓存）都生成在**程序所在目录**，之后请不要再挪动 exe ——
-> 换目录启动等于换一套空白数据，自选股和设置会“消失”。升级时用新 exe 覆盖旧的即可，数据保留。
+> **Windows 用户请注意**：先新建一个专属文件夹（例如 `D:\AI盘译`），把 exe 放进去，并从该文件夹启动/双击。
+> 程序的数据（`data\stock.db`、日志、缓存）生成在**启动时的工作目录**（通常就是 exe 所在目录）。
+> 之后不要换目录启动——换目录等于换一套空白数据，自选股和设置会“消失”。升级时用新 exe 覆盖旧的即可，数据保留。
 
 > **首次运行的安全提示**：本项目的可执行文件**没有代码签名证书**，因此从网络下载后首次运行可能遇到：
 >
@@ -214,7 +218,7 @@ AI 编码助手在动手前应先读它。
 
 本项目基于以下开源项目构建：
 
-- [AI盘译](https://github.com/ArvinLovegood/go-stock) —— 上游项目，本项目的起点
+- [go-stock](https://github.com/ArvinLovegood/go-stock) —— 上游项目，本项目的起点
 - [Wails](https://wails.io/) / [Vue](https://vuejs.org/) / [Vite](https://vitejs.org/) / [NaiveUI](https://www.naiveui.com/)
 - [ECharts](https://echarts.apache.org/) / [lightweight-charts](https://tradingview.github.io/lightweight-charts/) / [md-editor-v3](https://github.com/imzbf/md-editor-v3)
 - [chromem-go](https://github.com/philippgille/chromem-go) / [eino](https://github.com/cloudwego/eino)
@@ -236,7 +240,7 @@ AI 编码助手在动手前应先读它。
 
 [GNU GPLv3](LICENSE)
 
-本项目是 AI盘译 的衍生作品，依据 GNU General Public License v3.0 发布。
+本项目是 go-stock 的衍生作品，依据 GNU General Public License v3.0 发布。
 你可以自由使用、研究、修改和再分发本项目的全部源码（包括本 fork 的所有修改），
 但必须同样以 GPLv3 授权你的衍生版本，并保留原始版权声明与修改标注。
 
