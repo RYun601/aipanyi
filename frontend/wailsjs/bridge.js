@@ -1,14 +1,11 @@
 /*
- * bridge.js — AI盘译 前端双模式桥接层
+ * bridge.js — AI盘译 前端 Wails 桥接层
  *
- * 目的：让同一份前端代码同时运行在两种形态下，业务代码零改动：
- *   - 桌面模式（Wails）：检测到 window.runtime / window.go 时，直接调用原生绑定；
- *   - Web 模式（-tags web）：通过 POST /api/call 反射派发 + WebSocket 事件总线。
+ * 桌面端固定运行在 Wails 容器中：检测到 window.runtime / window.go 后直接调用原生绑定。
+ * 桌面网页版模式已移除；文件后半部分的 /api/call 与 WebSocket 兼容分支不再有后端，
+ * 仅作为历史代码保留，桌面端不会走到。
  *
- * 鉴权：Web 模式下由服务端把启动令牌注入 index.html（window.__AIPANYI_TOKEN__），
- *       本模块在每次请求头与 WS 查询参数中携带。
- *
- * 本文件由 webserver shim 引入，替代 wails 生成的 window['go'] 直接调用。
+ * 本文件替代 wails 生成的 window['go'] 直接调用。
  */
 
 const TOKEN = (typeof window !== 'undefined' && window.__AIPANYI_TOKEN__) || '';

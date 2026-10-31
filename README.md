@@ -134,22 +134,23 @@ cd aipanyi
 # 0. 安装 Wails CLI（一次性）
 go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
 
-# 1. 构建前端（两种模式共用；wails build 也会自动跑一遍）
+# 1. 构建前端（wails build 也会自动跑一遍）
 cd frontend && npm install && npm run build && cd ..
 
-# 2a. 桌面模式（默认，Wails 原生窗口）
+# 2. 桌面构建（Wails 原生窗口，默认且唯一 UI 形态）
 wails build -platform windows/amd64 -o aipanyi
-
-# 2b. Web 模式（本地 HTTP 服务 + 默认浏览器）
-wails build -tags web -platform windows/amd64 -o aipanyi-web
 ```
 
 > ⚠️ `-o aipanyi` **不会自动补 `.exe`**：Windows 上产物是 `build/bin/aipanyi`（无扩展名），
 > 自行 `Copy-Item build/bin/aipanyi build/bin/aipanyi.exe` 即可。
 > 也不要用 `go build` 代替 `wails build` —— 拿不到 Wails 运行时，前端产物也不保证被打包进去。
 
-Web 模式下用系统默认浏览器打开本地界面（地址类似 `http://127.0.0.1:<随机端口>`），端口每次启动随机生成，
-并带一次性 token 校验，本机之外的设备默认无法访问；桌面模式则是原生窗口。
+> 数据目录 `data/` 相对于**启动时的工作目录**。从仓库根目录启动会读取 `F:\aipanyi\data`；
+> 直接运行 `build/bin/aipanyi` 会使用 `build/bin/data`，不会自动读取仓库根目录的数据。
+> 迁移或升级时请把整个 `data/` 目录一起带上。
+
+桌面端使用 Wails 原生窗口；浏览器网页版模式已移除，详见
+[ADR-002](docs/ADR-002-移除桌面网页版模式.md)。`webserver` 包仅保留给 Android 端本地界面使用。
 
 更多细节见 [`docs/快速开始指南.md`](docs/快速开始指南.md) 与 [`docs/BUILD_LINUX.md`](docs/BUILD_LINUX.md)。
 
@@ -196,7 +197,8 @@ GPL 也意味着任何"本地功能锁"都能被合法移除——所以本项�
 - [知识库与长期记忆功能说明](docs/知识库与长期记忆功能说明.md)
 - [AI对话与视觉理解功能说明](docs/AI对话与视觉理解功能说明.md)
 - [技能管理功能说明](docs/技能管理功能说明.md)
-- [架构决策记录 ADR-001](docs/ADR-001-UI浏览器化与AI边车架构决策.md)
+- [架构决策记录 ADR-001（已由 ADR-002 取代）](docs/ADR-001-UI浏览器化与AI边车架构决策.md)
+- [架构决策记录 ADR-002：移除桌面网页版模式](docs/ADR-002-移除桌面网页版模式.md)
 
 ---
 

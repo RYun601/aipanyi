@@ -55,7 +55,7 @@ Android App
 - `backend/data`：行情、K 线、AI 流、AI 配置、提示词、自选股。
 - `backend/db`：SQLite/GORM。
 - `backend/webserver`：静态资源、`/api/call`、WebSocket、token。
-- `backend/events`：事件广播（`-tags web`）。
+- `backend/events`：Android 端事件广播（`-tags mobileassets`）。
 - `frontend/wailsjs/bridge.js` 的协议思路（移动端单独实现轻量客户端）。
 
 不编译桌面 `main.App`（依赖 Wails/托盘/更新器），移动端使用独立 `MobileApp` 门面。
@@ -333,10 +333,10 @@ npm run build          # 输出到 mobile/webui/dist
 ### 13.2 Go 核心
 
 ```bash
-go build -tags "web mobileassets" ./mobile/core
-go build -tags "web mobileassets" ./mobile/...
+go build -tags "mobileassets" ./mobile/core
+go build -tags "mobileassets" ./mobile/...
 go test ./mobile/alerts   # 纯逻辑单测；不依赖网络/DB
-GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -tags "web mobileassets" ./mobile/...
+GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -tags "mobileassets" ./mobile/...
 ```
 
 > `mobile/core` 的测试二进制会链接完整数据栈（chromedp/eino），Windows Defender 可能误判为病毒；
@@ -346,7 +346,7 @@ GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -tags "web mobileassets" ./mobi
 
 ```bash
 gomobile bind -target=android/arm64 -androidapi 26 \
-  -tags "web mobileassets" \
+  -tags "mobileassets" \
   -o mobile/android/app/libs/mobilecore.aar \
   aipanyi/mobile/core
 ```
@@ -364,7 +364,7 @@ cd mobile/android
 ### 13.5 回归
 
 ```bash
-go build ./... && go build -tags web ./...
+go build ./...
 go vet ./...
 go test ./backend/data/... ./mobile/core/...
 cd frontend && npm run build
@@ -429,7 +429,7 @@ cd frontend && npm run build
 5. AI 分析完成，自动带入成本价/持仓；结果落库，切走再回来仍在。
 6. AI 提取出建议规则，确认后写入；不合法价格被丢弃。
 7. 断网、停牌、行情接口失败时不误报。
-8. 桌面端 `go build ./...`、`go build -tags web ./...`、`go test ./webserver/...`、`frontend npm run build` 全部通过。
+8. 桌面端 `go build ./...`、`go vet ./...`、`go test ./webserver/...`、`frontend npm run build` 全部通过。
 
 ## 16. 风险与待验证
 
@@ -459,14 +459,13 @@ cd frontend && npm run build
 
 ```powershell
 go build .                                  # 桌面通过
-go build -tags web .                        # Web 模式通过
-go build -tags web ./mobile/...             # 移动核心（占位页）通过
-go build -tags "web mobileassets" ./mobile/...  # 移动核心 + 真实前端通过
-GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -tags web ./mobile/...
-go vet -tags "web mobileassets" ./mobile/...
+go build ./mobile/...                       # 移动核心（占位页）通过
+go build -tags "mobileassets" ./mobile/...  # 移动核心 + 真实前端通过
+GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -tags "mobileassets" ./mobile/...
+go vet -tags "mobileassets" ./mobile/...
 go test ./mobile/alerts                     # 状态机/解析单测通过
 go test ./backend/db                        # DSN 回归通过
-go test ./webserver/...                     # Web 承载层回归通过
+go test ./webserver/...                     # 移动端本地承载层回归通过
 cd frontend && npm run build                # 桌面端前端通过
 cd mobile/frontend && npm run build         # 移动端前端通过
 ```
