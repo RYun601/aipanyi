@@ -180,11 +180,8 @@ func main() {
 		}
 	}()
 
-	// 选择 UI 承载方式：Web 模式（-tags web）走本地 HTTP 服务 + 浏览器，否则走 Wails 窗口
-	if useWebUI {
-		err = app.startWebServer()
-	} else {
-		err = wails.Run(&options.App{
+	// 桌面端固定使用 Wails 窗口
+	err = wails.Run(&options.App{
 		Title: "AI盘译 " + OFFICIAL_STATEMENT,
 		// 默认窗口大小：自适应但保留明显边距
 		Width:  appWidth,
@@ -244,7 +241,6 @@ func main() {
 			},
 		},
 	})
-	}
 
 	if err != nil {
 		log.SugaredLogger.Fatal(err)

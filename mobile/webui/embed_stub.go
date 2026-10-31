@@ -18,7 +18,7 @@ var FS fs.FS = fstest.MapFS{
 <body style="font-family:sans-serif;padding:24px;line-height:1.7">
 <h2>移动端页面尚未构建</h2>
 <p>请先执行：</p><pre>cd mobile/frontend &amp;&amp; npm install &amp;&amp; npm run build</pre>
-<p>然后使用 <code>-tags "web mobileassets"</code> 重新构建 Go 核心。</p>
+<p>然后使用 <code>-tags "mobileassets"</code> 重新构建 Go 核心。</p>
 </body></html>`),
 	},
 }

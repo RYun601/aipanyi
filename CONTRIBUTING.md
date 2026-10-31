@@ -54,7 +54,7 @@ git checkout -b refactor/xxx # 重构
 - **不要用 `window.onresize = ...`**——全局唯一槽位，会覆盖别的组件且不注销。用 `addEventListener` + `onBeforeUnmount` 里 `removeEventListener`
 - **图表必须做容器自适应**——用 `frontend/src/composables/useChartAutoResize.js`
 - **仓库坐标统一走 `backend/appinfo`**——不要在业务代码里硬编码 GitHub 地址或 IP
-- **事件用 `backend/events` 的 `events.Emit`**——不要直接用 `runtime.EventsEmit`，Web 模式会崩
+- **事件用 `backend/events` 的 `events.Emit`**——不要直接用 `runtime.EventsEmit`，否则前端收不到事件，Android 端也无法广播
 - **前端调后端一律走 `frontend/wailsjs/go/main/App.js`**——不要直接 `fetch` 远程接口
 
 #### 4. 验证
@@ -62,13 +62,14 @@ git checkout -b refactor/xxx # 重构
 提交前必须全部通过（详细命令见 `AGENTS.md` §2）：
 
 ```bash
-go build ./... && go build -tags web ./...
-go vet ./...   && go vet -tags web ./...
+go build ./...
+go vet ./...
 go test ./webserver/...
 cd frontend && npm run build
 ```
 
-**两种构建模式都要验**。另外注意：
+桌面端只保留 Wails 一种 UI 形态；涉及 Android 端时还要验证
+`go build -tags mobileassets ./...`。另外注意：
 
 - `gofmt -l` 报全仓库需格式化是既有状态（仓库为 CRLF 行尾），**不要**顺手全量格式化，否则会产生巨大的无关 diff
 - `backend/data` 包测试报 DB 连接失败是既有环境问题，不要试图"修复"

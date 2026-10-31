@@ -1,11 +1,8 @@
 // @ts-check
-// AI盘译 前端绑定层（双模式）—— 由 scripts/gen-bindings.js 自动生成，请勿手工编辑。
+// AI盘译 前端绑定层（Wails）—— 由 scripts/gen-bindings.js 自动生成，请勿手工编辑。
 //
-// wails 原生生成的结果是 window['go'] 直连，只在桌面容器里有效；这里统一改写为
-// 走 bridge.js 的 call()，由它按运行环境分发：
-//   - 桌面模式（Wails）：转发到 window['go']['main']['App'][method]
-//   - Web 模式（浏览器）：POST /api/call 反射派发
-// 业务代码 import 方式不变。
+// wails 原生生成的结果是 window['go'] 直连；这里统一改写为走 bridge.js 的 call()，
+// 由它转发到 window['go']['main']['App'][method]。业务代码 import 方式不变。
 
 import { call } from '../../bridge.js';
 export function AbortChatWithAgent(...args) {

@@ -269,7 +269,7 @@ func (a *CronTaskApi) executeStockAnalysis(ctx context.Context, task *models.Cro
 	prompt = data.NewPromptTemplateApi().GetPromptTemplateByID(params.PromptId)
 	var tools []data.Tool
 	tools = data.Tools(tools)
-	msgs := data.NewDeepSeekOpenAi(ctx, params.AiConfigId).NewChatStream(params.StockName, data.ConvertTushareCodeToStockCode(params.StockCode), prompt, &params.SysPromptId, tools, params.Thinking)
+	msgs := data.NewDeepSeekOpenAi(ctx, params.AiConfigId).NewChatStream(params.StockName, data.ConvertTushareCodeToStockCode(params.StockCode), prompt, &params.SysPromptId, tools, params.Thinking, nil)
 	content := &strings.Builder{}
 	for msg := range msgs {
 		if v, ok := msg["content"].(string); ok {

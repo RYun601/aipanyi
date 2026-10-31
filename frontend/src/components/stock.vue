@@ -435,6 +435,10 @@ const currentStockTradingPrice = ref({
 const addBTN = ref(true)
 const enableTools = ref(true)
 const thinkingMode = ref(true)
+const withPosition = ref(false)
+const positionLoading = ref(false)
+const positionOptions = ref([])
+const selectedPositionCodes = ref([])
 const formModel = ref({
   name: "",
   code: "",
@@ -475,6 +479,68 @@ const data = reactive({
 })
 const feishiInterval = ref(null)
 const aiAnalysisTimeout = ref(null)
+
+// 桌面端 AI 分析的持仓上下文：默认关闭；开启后只传用户勾选的、已配置成本/持仓的自选股。
+const currentPositionSelected = computed(() => {
+  const current = normalizePositionCode(data.code)
+  return !!current && positionOptions.value.some(
+    item => item.value === current && selectedPositionCodes.value.includes(item.value)
+  )
+})
+
+function normalizePositionCode(code) {
+  let c = String(code || '').trim().toLowerCase()
+  if (!c) return ''
+  if (c.startsWith('us')) c = 'gb_' + c.slice(2)
+  const suffix = c.match(/^(\d{6})\.(sh|sz)$/)
+  if (suffix) return suffix[2] + suffix[1]
+  const hkSuffix = c.match(/^(\d{5})\.hk$/)
+  if (hkSuffix) return 'hk' + hkSuffix[1]
+  if (/^\d{6}$/.test(c)) return (c.startsWith('6') ? 'sh' : 'sz') + c
+  return c
+}
+
+function loadPositionOptions() {
+  withPosition.value = false
+  selectedPositionCodes.value = []
+  positionLoading.value = true
+  GetFollowList(0).then(list => {
+    const rows = []
+    const seen = new Set()
+    const current = normalizePositionCode(data.code)
+    for (const followed of list || []) {
+      const code = normalizePositionCode(followed.StockCode)
+      const cost = Number(followed.CostPrice) || 0
+      const volume = Number(followed.Volume) || 0
+      if (!code || seen.has(code) || cost <= 0 || volume <= 0) continue
+      seen.add(code)
+      rows.push({
+        value: code,
+        code: followed.StockCode || code,
+        name: followed.Name || code,
+        costPrice: cost,
+        volume,
+        current: code === current,
+      })
+    }
+    positionOptions.value = rows
+    selectedPositionCodes.value = rows.map(row => row.value)
+  }).catch(err => {
+    positionOptions.value = []
+    selectedPositionCodes.value = []
+    message.error('加载持仓列表失败: ' + (err?.message || err))
+  }).finally(() => {
+    positionLoading.value = false
+  })
+}
+
+function selectAllPositions() {
+  selectedPositionCodes.value = positionOptions.value.map(row => row.value)
+}
+
+function clearPositions() {
+  selectedPositionCodes.value = []
+}
 
 
 const currentGroupId = ref(0)
@@ -1130,23 +1196,39 @@ onMounted(() => {
   });
 
   message.loading("Loading...")
-  GetFollowList(currentGroupId.value).then(result => {
-
-    followList.value = result
-    for (const followedStock of result) {
-      if (followedStock.StockCode.startsWith("us")) {
-        followedStock.StockCode = "gb_" + followedStock.StockCode.replace("us", "").toLowerCase()
-      }
-      if (!stocks.value.includes(followedStock.StockCode)) {
-        stocks.value.push(followedStock.StockCode)
-      }
-      Greet(followedStock.StockCode).then(result => {
-        updateData(result)
-      })
-    }
-    //monitor()
-    message.destroyAll()
+  const loadFollowList = GetFollowList(currentGroupId.value)
+  const loadTimeout = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error("加载自选股超时，请稍后重试")), 12000)
   })
+  Promise.race([loadFollowList, loadTimeout])
+    .then(result => {
+      const list = result || []
+      followList.value = list
+      for (const followedStock of list) {
+        if (followedStock.StockCode.startsWith("us")) {
+          followedStock.StockCode = "gb_" + followedStock.StockCode.replace("us", "").toLowerCase()
+        }
+        if (!stocks.value.includes(followedStock.StockCode)) {
+          stocks.value.push(followedStock.StockCode)
+        }
+        Greet(followedStock.StockCode).then(result => {
+          updateData(result)
+        })
+      }
+      //monitor()
+    })
+    .catch(err => {
+      followList.value = []
+      console.error("加载自选股失败:", err)
+      notify.error({
+        title: "加载自选股失败",
+        content: String(err?.message || err),
+        duration: 5000,
+      })
+    })
+    .finally(() => {
+      message.destroyAll()
+    })
 
   GetVersionInfo().then((res) => {
     icon.value = res.icon
@@ -1423,7 +1505,8 @@ function doFollowStock(groupId) {
           }
         }).catch(err => message.error('加入分组失败: ' + (err?.message || err)))
       }
-      GetFollowList(currentGroupId.value).then(result => { followList.value = result })
+      GetFollowList(currentGroupId.value).then(result => { followList.value = result || [] })
+        .catch(err => message.error('刷新自选股失败: ' + (err?.message || err)))
       monitor()
     } else {
       message.error(result)
@@ -2956,15 +3039,19 @@ function updateCostPriceAndVolumeNew(code, price, volume, alarm, formModel) {
     modalShow.value = false
     message.success(result)
     GetFollowList(currentGroupId.value).then(result => {
-      followList.value = result
+      const list = result || []
+      followList.value = list
       stocks.value = []
-      for (const followedStock of result) {
+      for (const followedStock of list) {
         if (!stocks.value.includes(followedStock.StockCode)) {
           stocks.value.push(followedStock.StockCode)
         }
       }
       monitor()
       message.destroyAll()
+    }).catch(err => {
+      message.destroyAll()
+      message.error("加载自选股失败: " + (err?.message || err))
     })
   })
 }
@@ -3099,6 +3186,14 @@ function aiReCheckStock(stock, stockCode) {
     message.error("请先选择AI模型配置")
     return
   }
+  if (positionLoading.value) {
+    message.warning("持仓列表加载中，请稍候")
+    return
+  }
+  if (withPosition.value && selectedPositionCodes.value.length === 0) {
+    message.error("已开启「带入持仓信息」，请至少勾选一只已配置成本/持仓的股票")
+    return
+  }
   // 清除之前的超时定时器
   if (aiAnalysisTimeout.value) {
     clearTimeout(aiAnalysisTimeout.value)
@@ -3118,8 +3213,22 @@ function aiReCheckStock(stock, stockCode) {
   //
 
   //message.info("sysPromptId:"+data.sysPromptId)
-  NewChatStream(stock, stockCode, data.question, data.aiConfigId, data.sysPromptId, enableTools.value,thinkingMode.value)
+  NewChatStream(
+    stock,
+    stockCode,
+    data.question,
+    data.aiConfigId,
+    data.sysPromptId,
+    enableTools.value,
+    thinkingMode.value,
+    withPosition.value,
+    withPosition.value ? selectedPositionCodes.value.slice() : []
+  )
     .catch(err => {
+      if (aiAnalysisTimeout.value) {
+        clearTimeout(aiAnalysisTimeout.value)
+        aiAnalysisTimeout.value = null
+      }
       data.loading = false
       data.analysisStatus = ""
       message.destroyAll()
@@ -3593,9 +3702,10 @@ function updateTab(name) {
   const tabId= Number(name)
   currentGroupId.value = tabId;
   GetFollowList(tabId).then(result => {
-    followList.value = result
+    const list = result || []
+    followList.value = list
 
-    for (const followedStock of result) {
+    for (const followedStock of list) {
       if (followedStock.StockCode.startsWith("us")) {
         followedStock.StockCode = "gb_" + followedStock.StockCode.replace("us", "").toLowerCase()
       }
@@ -3606,6 +3716,10 @@ function updateTab(name) {
     }
     //monitor()
     message.destroyAll()
+  }).catch(err => {
+    followList.value = []
+    message.destroyAll()
+    message.error("加载自选股失败: " + (err?.message || err))
   })
 }
 
@@ -3715,7 +3829,11 @@ watch([tdxAmountFilter, filteredTdxTransactionList], () => {
           flex-height
           :scroll-x="1400"
           style="height: calc(100dvh - 190px);"
-        />
+        >
+          <template #empty>
+            <n-empty description="暂无自选股，点击右上角「关注」添加" size="small" style="padding: 24px 0"/>
+          </template>
+        </n-data-table>
       </div>
     </n-tab-pane>
     <n-tab-pane closable v-for="group in groupList" :group-id="group.ID" :name="String(group.ID)" :tab="group.name">
@@ -4089,7 +4207,7 @@ watch([tdxAmountFilter, filteredTdxTransactionList], () => {
   </n-modal>
 
   <n-modal transform-origin="center" v-model:show="modalShow4" preset="card" style="width: 800px;max-width: calc(100vw - 32px);"
-           :title="'['+data.name+']AI分析'">
+           :title="'['+data.name+']AI分析'" @after-enter="loadPositionOptions">
     <n-spin size="small" :show="data.loading && !data.airesult">
       <MdEditor v-if="enableEditor" :toolbars="toolbars" ref="mdEditorRef" style="height: 440px;max-height: 60vh;text-align: left"
                 :modelValue="data.airesult" :theme="theme">
@@ -4136,6 +4254,62 @@ watch([tdxAmountFilter, filteredTdxTransactionList], () => {
           *AI函数工具调用可以增强AI获取数据的能力,但会消耗更多tokens。
         </n-gradient-text>
       </n-flex>
+      <n-flex justify="left" align="center" style="margin-bottom: 10px">
+        <n-switch v-model:value="withPosition" :round="false"
+                  :disabled="data.loading || positionLoading || positionOptions.length === 0">
+          <template #checked>
+            带入持仓
+          </template>
+          <template #unchecked>
+            不带持仓
+          </template>
+        </n-switch>
+        <n-text depth="3" style="font-size: 12px">
+          默认关闭；开启后只把勾选的持仓股票和组合传给 AI。
+        </n-text>
+        <n-text v-if="!positionLoading && positionOptions.length === 0" depth="3" style="font-size: 12px">
+          暂无可用的持仓股票（需同时设置成本价和持仓数量）。
+        </n-text>
+      </n-flex>
+      <div v-if="withPosition"
+           style="margin-bottom: 10px; padding: 8px; border: 1px solid var(--n-border-color); border-radius: 6px;">
+        <n-flex justify="space-between" align="center" style="margin-bottom: 6px">
+          <n-text depth="3" style="font-size: 12px">
+            已选 {{ selectedPositionCodes.length }} / {{ positionOptions.length }} 只；权重按勾选股票市值计算，不含现金/未勾选股票。
+          </n-text>
+          <n-flex :size="6">
+            <n-button size="tiny" secondary :disabled="data.loading || positionLoading"
+                      @click="selectAllPositions">全选
+            </n-button>
+            <n-button size="tiny" secondary
+                      :disabled="data.loading || positionLoading || selectedPositionCodes.length === 0"
+                      @click="clearPositions">清空
+            </n-button>
+          </n-flex>
+        </n-flex>
+        <n-spin v-if="positionLoading" size="small"/>
+        <n-text v-else-if="positionOptions.length === 0" depth="3" style="font-size: 12px">
+          暂无已配置成本价和持仓数量的自选股。
+        </n-text>
+        <n-checkbox-group v-else v-model:value="selectedPositionCodes" :disabled="data.loading">
+          <n-flex vertical :size="4" style="max-height: 150px; overflow-y: auto;">
+            <n-checkbox v-for="item in positionOptions" :key="item.value" :value="item.value">
+              <span style="font-size: 12px">{{ item.name }}</span>
+              <n-tag size="tiny" :bordered="false" style="margin-left: 4px">{{ item.code }}</n-tag>
+              <n-tag v-if="item.current" size="tiny" type="warning" :bordered="false" style="margin-left: 4px">
+                当前
+              </n-tag>
+              <span style="font-size: 12px; color: var(--n-text-color-3); margin-left: 6px">
+                成本 {{ item.costPrice }} · {{ item.volume }} 股
+              </span>
+            </n-checkbox>
+          </n-flex>
+        </n-checkbox-group>
+        <n-text v-if="positionOptions.length > 0 && !currentPositionSelected" type="warning"
+                style="font-size: 12px">
+          当前股票未在勾选范围内，本次不会把它的成本/持仓传给 AI。
+        </n-text>
+      </div>
       <n-flex justify="space-between" style="margin-bottom: 10px">
         <n-select style="width: 31%" v-model:value="data.aiConfigId" label-field="name" value-field="ID"
                   :options="aiConfigs" placeholder="请选择AI模型服务配置"/>
@@ -4155,7 +4329,10 @@ watch([tdxAmountFilter, filteredTdxTransactionList], () => {
             }"
         />
         <!--        <n-button size="tiny" type="error" @click="enableEditor=!enableEditor">编辑/预览</n-button>-->
-        <n-button size="tiny" type="warning" @click="aiReCheckStock(data.name,data.code)">开始AI分析</n-button>
+        <n-button size="tiny" type="warning"
+                  :disabled="data.loading || positionLoading || (withPosition && selectedPositionCodes.length === 0)"
+                  @click="aiReCheckStock(data.name,data.code)">开始AI分析
+        </n-button>
         <n-button size="tiny" type="info" @click="saveAsImage(data.name,data.code)">保存为图片</n-button>
         <n-button size="tiny" type="success" @click="copyToClipboard">复制到剪切板</n-button>
         <n-button size="tiny" type="primary" @click="saveAsMarkdown">保存为Markdown文件</n-button>
