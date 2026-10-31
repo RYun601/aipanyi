@@ -64,6 +64,22 @@ OpenAI 兼容接口 / Ollama / LMStudio / AnythingLLM / DeepSeek / 智谱 / 豆�
 
 ---
 
+## 📱 Android 手机端（实验）
+
+仓库内新增 `mobile/` 独立 Android 客户端，面向手机上的轻量使用场景：
+
+- 自选、成本/持仓、AI 分析、AI 配置与系统提示词、价格触发提醒（30 秒轮询）
+- 数据保存在手机本地 SQLite，不上云；AI 请求直达你配置的模型服务
+- 当前为 debug 侧载版，未纳入 CI 发布；构建与 Honor/MagicOS 设置见
+  [`mobile/android/README.md`](mobile/android/README.md)
+- 设计与真机验收记录见
+  [`docs/plan/2026-10-29-android-price-alert-mvp.md`](docs/plan/2026-10-29-android-price-alert-mvp.md)
+
+> 手机端不包含桌面的 K 线、回测、MCP 等重功能。Honor/MagicOS 需要允许自启动/后台活动、
+> 关闭电池优化；App 已从最近任务隐藏，避免被划掉，从桌面/通知打开；重启后请重新打开一次 App 恢复监控。
+
+---
+
 ## 🚀 快速开始
 
 ### 下载即用

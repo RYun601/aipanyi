@@ -1,6 +1,6 @@
 # Android 壳
 
-这是 AI盘译 的 Android 原生壳：WebView 加载 Go 核心启动的本地服务，前台服务负责保活与通知。
+这是 AI盘译 的 Android 原生壳：`MonitorService` 在独立 `:monitor` 进程里持有 Go 核心并启动本地 HTTP 服务；Activity/WebView 通过 `CORE_READY` 广播拿到本地 URL 后加载页面，前台服务负责保活与通知。
 
 ## 本机已验证的工具链（2026-10-31）
 
@@ -57,7 +57,20 @@ public interface mobilecore.Notifier {
 }
 ```
 
-Kotlin 侧 `AppNotifier` / `MainActivity` 已按此实现。
+Kotlin 侧 `AppNotifier` / `MonitorService` 已按此实现；`MainActivity` 不再直接启动 Go 核心。
+
+## 真机验收（2026-10-31，Honor 50 / MagicOS 8.0.0.221）
+
+- **已通过**：安装/启动、自选与成本持仓、价格提醒 CRUD、AI 建议确认写入、DeepSeek 真实分析
+  （约 10.5 秒，带成本/持仓/30 日 K 线）、测试通知、前台服务、Home/锁屏存活、电池白名单、
+  强行停止后重启恢复。
+- **进程模型**：Go 核心在 `:monitor` 前台服务进程；Activity 只负责 WebView 与原生桥，
+  通过 `CORE_READY` 广播拿本地 URL。Go 进程时区固定为 `Asia/Shanghai`，避免交易时段判断偏 8 小时。
+- **Honor 限制**：早期版本划掉任务会杀掉整个 App（包括 `:monitor` 进程）；已用
+  `excludeFromRecents` 把 App 从最近任务隐藏，实测“清理全部”后服务仍在，从桌面/通知打开即可。
+  重启后 Honor 可能不自动拉起，需手动打开一次 App。数据（自选/提醒/分析）均保留。
+- **实盘触发**：验收日为周六，未测真实价格穿越；状态机单测和通知链路已通过，下一个交易日补测。
+- 详细记录见 [`docs/plan/2026-10-29-android-price-alert-mvp.md`](../../docs/plan/2026-10-29-android-price-alert-mvp.md)。
 
 ## 常见问题
 
@@ -81,6 +94,8 @@ Kotlin 侧 `AppNotifier` / `MainActivity` 已按此实现。
 1. 允许通知（Android 13+ 会弹窗）。
 2. 设置 → 应用 → 应用启动管理 → AI盘译 → 手动管理：允许自启动、关联启动、后台活动。
 3. 电池 → 更多电池设置 → 关闭对 AI盘译 的省电限制。
-4. 最近任务里下拉锁定 AI盘译。
+4. App 已从最近任务隐藏，避免被划掉；从桌面图标或常驻通知打开。
+5. 重启手机后如果通知没有自动恢复，打开一次 AI盘译；自选、提醒、分析结果都会保留。
+6. 设置页「测试通知」可检查通知权限和渠道是否正常。
 
 即使全部设置，ROM 仍可能清理后台；价格提醒无法承诺 100% 准时。

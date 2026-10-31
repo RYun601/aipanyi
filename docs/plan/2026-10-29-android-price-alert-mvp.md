@@ -433,7 +433,7 @@ cd frontend && npm run build
 | --- | --- | --- |
 | gomobile 与 Go 1.27 兼容性 | 无法打 AAR | 先做 hello-world spike；失败则改用 native 可执行库方式，Go 接口不变 |
 | APK 体积 40-80MB | 下载/安装偏大 | 只打 arm64；后续裁剪未用包 |
-| MagicOS 杀后台 | 漏提醒 | 前台服务 + 白名单 + 自启动 + 最近任务锁；文档明确不保证 100% |
+| MagicOS 杀后台 | 漏提醒 | 前台服务 + 白名单 + 自启动 + `excludeFromRecents` 隐藏任务；强停/深度清理仍会停，文档明确不保证 100% |
 | 30 秒轮询漏掉瞬时刺破 | 漏报 | 产品定位为分钟级提醒；可调至 10 秒但更费电 |
 | AI 提取价格幻觉 | 错误规则 | 0.5~2 倍现价校验 + 用户确认 |
 | 行情源限流 | 数据缺失 | 批量请求、失败跳过不误报；后续可换源 |
@@ -449,7 +449,7 @@ cd frontend && npm run build
   - 生成 `mobilecore.aar`（12.1 MB，arm64-v8a；`-ldflags "-s -w"` 去掉符号后）。
   - 修复 Kotlin `onNewIntent` 签名后，`assembleDebug` 成功，`app-debug.apk` 26.7 MiB。
   - APK 校验：`com.aipanyi.mobile`，minSdk 26 / targetSdk 34，权限与 arm64 原生库齐全。
-  - 真机尚未连接（`adb devices` 为空），Honor 50 验收待做。
+  - 2026-10-31：Honor 50 真机验收完成（见下方「真机验收记录」）；补充轻量 AI 分析、时区修正、独立监控进程与测试通知。
 
 ### 已验证（本机）
 
@@ -474,9 +474,64 @@ cd mobile/frontend && npm run build         # 移动端前端通过
 - `StartAnalysis` 流式事件经 WS 推送，完成后落库。
 - `ExtractAlerts` 从分析中提取出 `below 1450` 建议并通过校验。
 
-### 待完成
+### 待完成（2026-10-31 前）
 
 - Honor 50 真机验收：前台/后台/锁屏/划掉任务/重启/强行停止；MagicOS 自启动与电池白名单。
 - 手机通过 USB 连接后：`adb install -r mobile/android/app/build/outputs/apk/debug/app-debug.apk`。
 - `mobile/core` 的测试二进制在本机被 Windows Defender 误判，CI 或关闭实时防护的机器可跑；
   纯逻辑测试已放在 `mobile/alerts`。
+
+### 真机验收记录（2026-10-31）
+
+环境：Honor 50 NTH-AN00，MagicOS 8.0.0.221（Android 14），arm64；debug 侧载。
+产物：`mobilecore.aar` 12 MB；`app-debug.apk` 26.7 MiB；方便取用的副本
+`dist/aipanyi-android-0.1.0-debug.apk`，SHA256
+`42F8784DC3D44265BD6F986417A44685482F08CB6DBEAA63B54ED0A9C30B3346`。
+
+已通过：
+
+- **安装/自选**：搜索 600519 → 关注 → 成本 1500.50/100 股；行情 1392.05（+2.81%）、
+  盈亏 -10,845.00（-7.23%）显示正确。
+- **价格提醒**：手动 below 1400 创建/开关/删除正常；AI 从真实分析中提取 9 条建议
+  （1410/1390/1352/1330/1310/1288/1230/1450/1500），弹层勾选确认后写入 `source=ai`；
+  测试后已清理，仅保留 1 条手写规则。
+- **AI 配置/真实分析**：使用临时 DeepSeek key（不写入仓库，测试后已从 App 删除配置），
+  `deepseek-chat` 官方接口；一次分析约 10.5 秒、输出 2650 字；正确引用成本/持仓和 30 日 K 线，
+  生成支撑/压力/仓位/止损策略；结果落库并在详情页 Markdown 渲染。
+- **时区**：修复前 Go 进程为 UTC，分析时间显示 03:xx，交易时段判断会整体偏 8 小时；
+  `Start` 中设置 `time.Local=Asia/Shanghai`，并让 `marketcal` 显式转换北京时间后，
+  日志/分析时间回到 11:xx。
+- **轻量分析**：桌面 `NewChatStream` 的 8 路数据源在手机网络下会卡 3 分钟以上
+  （假 AI 未被调用）；手机端改为「实时价 + 30 日 K 线 + 成本/持仓 + 单次流式 LLM」路径，
+  约 10 秒完成；桌面端 `NewChatStream` 同时加了 20 秒上下文超时兜底。
+- **通知**：系统通知权限已开启；测试通知（high importance，`price_alert` 通道）在通知栏正常展示；
+  前台服务常驻通知显示「监控中 · 1 条价格提醒」；点击负载使用 `stock_code` extra，
+  已用 `am start --es stock_code sh600519` 验证深链到 `#/stock/sh600519`。
+- **后台/锁屏**：Home、锁屏 30 秒后进程与前台服务仍在；`MonitorService` 已移到独立
+  `:monitor` 进程并由它持有 Go 核心，Activity 通过 `CORE_READY` 广播获取本地 URL。
+- **最近任务/清空**：`excludeFromRecents` 隐藏任务后，最近任务不再出现 AI盘译；
+  点“清理全部”后主进程/`:monitor` 进程、前台服务和通知仍在，重新打开数据正常。
+- **电池白名单**：通过系统「忽略电池优化」后，设置页显示「已允许后台运行」；
+  同时确认 `deviceidle whitelist` 包含 `com.aipanyi.mobile`。
+- **强行停止**：`am force-stop` 后进程与通知消失；重新打开 App 后数据库、自选、提醒、
+  AI 分析结果全部恢复，前台服务恢复。
+- **重启**：Honor 未自动拉起 App（BootReceiver 已注册、`active_alerts=1`、权限已授予）；
+  手动打开一次后服务/通知恢复，数据不丢。
+
+限制/未通过：
+
+- **最近任务**：早期版本划掉任务时 MagicOS 会杀掉全部进程（包括 `:monitor`）；
+  最终改为 `excludeFromRecents` 隐藏任务（从桌面/通知打开），实测“清理全部”后服务仍在。
+  强行停止、系统深度清理等仍会停止监控，需要重新打开 App。
+- **重启自启动**：即使电池白名单已加，Honor 仍拦截 `BOOT_COMPLETED` 拉起
+  （或 Android 14 对 `dataSync` 类型 FGS 的启动限制），需要重启后手动打开一次 App。
+  后续可研究 `specialUse`/设备保护存储 + 通知提醒，但无法保证 100%。
+- **实盘价格触发**：验收当天为周六，A 股休市，未做真实价格穿越；状态机单测、通知通道、
+  后台服务已分别验证。下一个交易日需补一次真实上穿/下穿提醒
+  （注意：非交易时段创建的新规则在首次检查时按 unknown 静默建立基准，需要价格重新穿越才触发）。
+
+### 剩余待办
+
+- 交易日实盘验证一次真实价格穿越通知。
+- Honor/MagicOS 上继续验证「隐藏最近任务 + 手动管理」后的长期存活；其他厂商 ROM 待测。
+- `mobile/core` 测试二进制的 Defender 误判问题（可用 CI/Linux 跑）。
