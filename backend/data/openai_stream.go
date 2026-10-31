@@ -370,7 +370,24 @@ func (o *OpenAi) NewSummaryStockNewsStream(userQuestion string, sysPromptId *int
 	return ch
 }
 
-func (o *OpenAi) NewChatStream(stock, stockCode, userQuestion string, sysPromptId *int, tools []Tool, thinking bool) <-chan map[string]any {
+// replacePromptTemplates 按固定顺序替换提示词占位符。
+// 必须先替换双花括号，再替换单花括号和裸 key；否则 map 遍历顺序随机时，
+// 单花括号规则可能先命中，留下 "{未提供}" 这样的残片。
+func replacePromptTemplates(text string, replaceTemplates map[string]string) string {
+	keys := []string{
+		"{{stockName}}", "{{stockCode}}", "{{costPrice}}", "{{costVolume}}",
+		"{stockName}", "{stockCode}", "{costPrice}", "{costVolume}",
+		"stockName", "stockCode", "costPrice", "costVolume",
+	}
+	for _, key := range keys {
+		if value, ok := replaceTemplates[key]; ok {
+			text = strings.ReplaceAll(text, key, value)
+		}
+	}
+	return text
+}
+
+func (o *OpenAi) NewChatStream(stock, stockCode, userQuestion string, sysPromptId *int, tools []Tool, thinking bool, position *PositionContext) <-chan map[string]any {
 	ch := make(chan map[string]any, 512)
 
 	defer func() {
@@ -434,31 +451,27 @@ func (o *OpenAi) NewChatStream(stock, stockCode, userQuestion string, sysPromptI
 				"content": fmt.Sprintf("截止到%s,当前%s[%s]价格是%s", (*stockData)[0].Date+" "+(*stockData)[0].Time, stock, stockCode, (*stockData)[0].Price),
 			})
 		}
-		if followedStock.CostPrice > 0 {
-			replaceTemplates["{{costPrice}}"] = convertor.ToString(followedStock.CostPrice)
-			replaceTemplates["{costPrice}"] = convertor.ToString(followedStock.CostPrice)
-			replaceTemplates["costPrice"] = convertor.ToString(followedStock.CostPrice)
-		} else {
-			// 未设置成本时也替换占位符，避免模板里出现裸 {{costPrice}} 被模型当成真实数据。
-			replaceTemplates["{{costPrice}}"] = "未设置"
-			replaceTemplates["{costPrice}"] = "未设置"
-			replaceTemplates["costPrice"] = "未设置"
-		}
-		if followedStock.Volume > 0 {
-			replaceTemplates["{{costVolume}}"] = convertor.ToString(followedStock.Volume)
-			replaceTemplates["{costVolume}"] = convertor.ToString(followedStock.Volume)
-			replaceTemplates["costVolume"] = convertor.ToString(followedStock.Volume)
-		} else {
-			replaceTemplates["{{costVolume}}"] = "未设置"
-			replaceTemplates["{costVolume}"] = "未设置"
-			replaceTemplates["costVolume"] = "未设置"
+		// position == nil 是旧调用方（如定时任务）的行为：自动带入当前股票成本/持仓。
+		// 桌面股票页会显式传入 PositionContext：关闭时全部填“未提供”，开启时只带入
+		// 本次勾选股票，当前股票未勾选则不提供它的成本/持仓。
+		applyPositionTemplates(replaceTemplates, followedStock, position)
+
+		if position != nil && position.Enabled && position.Markdown != "" {
+			msg = append(msg, map[string]interface{}{
+				"role":    "user",
+				"content": "我的持仓组合数据（仅本次勾选）",
+			})
+			msg = append(msg, map[string]interface{}{
+				"role":    "assistant",
+				"content": position.Markdown,
+			})
 		}
 
 		question := ""
 		if userQuestion == "" {
-			question = strutil.ReplaceWithMap(o.QuestionTemplate, replaceTemplates)
+			question = replacePromptTemplates(o.QuestionTemplate, replaceTemplates)
 		} else {
-			question = strutil.ReplaceWithMap(userQuestion, replaceTemplates)
+			question = replacePromptTemplates(userQuestion, replaceTemplates)
 		}
 
 		wg := &sync.WaitGroup{}
