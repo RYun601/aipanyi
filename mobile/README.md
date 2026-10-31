@@ -79,7 +79,8 @@ powershell -ExecutionPolicy Bypass -File mobile/scripts/build-apk.ps1
 - [x] `mobile/core`：SQLite、股票基础表导入、自选、AI 配置/提示词、AI 流、提醒 CRUD、提醒引擎、HTTP 门面
 - [x] `mobile/frontend`：自选、个股、提醒、设置四个页面，Vite 构建通过
 - [x] `mobile/android`：WebView、前台服务、通知渠道、开机广播、原生设置桥
-- [ ] gomobile AAR（需要本机安装 Android SDK/NDK）
+- [x] gomobile AAR（12.1 MB，arm64-v8a，`-s -w`）
+- [x] Debug APK（26.7 MiB，`app/build/outputs/apk/debug/app-debug.apk`）
 - [ ] 真机验收（Honor 50 / MagicOS 8）
 
 ## 已知限制

@@ -36,10 +36,10 @@ var (
 	engineCancel context.CancelFunc
 )
 
-// Start 启动移动端 Go 核心：初始化 SQLite、导入股票基础表、启动本地 HTTP 与提醒引擎。
+// Start initializes the mobile Go core: SQLite, stock seed, local HTTP server and alert engine.
 //
-// 幂等：Activity 与前台服务可能同时调用，重复调用返回同一个 URL。
-// dataDir 传 Android 的 context.filesDir。
+// It is idempotent: the Activity and the foreground service may call it concurrently;
+// repeated calls return the same URL. dataDir is Android's context.filesDir.
 func Start(dataDir string, n Notifier) (string, error) {
 	lifecycleMu.Lock()
 	defer lifecycleMu.Unlock()
@@ -95,7 +95,7 @@ func Start(dataDir string, n Notifier) (string, error) {
 	return baseURL, nil
 }
 
-// Stop 停止本地服务与提醒引擎。数据库连接保留，允许同一进程内再次 Start。
+// Stop stops the local server and alert engine. The database stays open for a later Start.
 func Stop() {
 	lifecycleMu.Lock()
 	defer lifecycleMu.Unlock()

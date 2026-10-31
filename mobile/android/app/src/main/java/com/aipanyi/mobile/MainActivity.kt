@@ -246,10 +246,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onNewIntent(intent: Intent?) {
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        val code = intent?.getStringExtra("stock_code")
+        val code = intent.getStringExtra("stock_code")
         if (!code.isNullOrBlank()) {
             pendingStockCode = code
             if (baseUrl != null) loadTarget()

@@ -132,6 +132,7 @@ frontend/package.json.md5
 /mobile/frontend/node_modules/
 /mobile/webui/dist/
 /mobile/android/app/libs/*.aar
+/mobile/android/app/libs/*.jar
 /mobile/android/.gradle/
 /mobile/android/build/
 /mobile/android/app/build/

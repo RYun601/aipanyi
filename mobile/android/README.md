@@ -2,52 +2,79 @@
 
 这是 AI盘译 的 Android 原生壳：WebView 加载 Go 核心启动的本地服务，前台服务负责保活与通知。
 
-## 前置
+## 本机已验证的工具链（2026-10-31）
 
-- JDK 17
-- Android SDK Platform 34 + Build-Tools 34
-- NDK 26.x（gomobile 需要）
-- Go 1.27+
-- Node.js 20+
+| 组件 | 路径/版本 |
+| --- | --- |
+| JDK 17 | `D:\tools\jdk17`（Microsoft OpenJDK 17.0.13） |
+| Android Studio | `D:\Program Files (x86)\android-studio`（仅 IDE，CLI 构建不依赖） |
+| Android SDK | `D:\tools\android-sdk` → junction 到 `D:\Program Files (x86)\Android` |
+| Platform / Build-Tools | `android-34` / `34.0.0` |
+| NDK | `26.1.10909125` |
+| Gradle | `8.9`，`D:\tools\gradle-8.9` |
+| Go | `1.27.0`，`D:\Program Files (x86)\golang` |
+| gomobile | `C:\Users\ranyu\go\bin\gomobile.exe`（2026-10） |
 
-环境变量：
-
-```powershell
-$env:ANDROID_HOME = "C:\Users\<you>\AppData\Local\Android\Sdk"
-$env:ANDROID_NDK_HOME = "$env:ANDROID_HOME\ndk\26.1.10909125"
-```
-
-安装 gomobile：
-
-```powershell
-go install golang.org/x/mobile/cmd/gomobile@latest
-gomobile init
-```
+> **NDK/SDK 路径不能含空格**：gomobile 调用 clang 时不会给路径加引号，
+> `D:\Program Files (x86)\...` 会被截成 `D:\Program`。本机用 junction 解决：
+>
+> ```powershell
+> New-Item -ItemType Junction -Path D:\tools\android-sdk -Target 'D:\Program Files (x86)\Android'
+> New-Item -ItemType Junction -Path D:\tools\android-jbr -Target 'D:\Program Files (x86)\android-studio\jbr'
+> ```
 
 ## 构建
 
 ```powershell
-# 1) 前端 + AAR
+# 1) 前端 + AAR（约 12MB，含 arm64 libgojni.so）
 powershell -ExecutionPolicy Bypass -File mobile/scripts/build-aar.ps1 -Version 0.1.0
 
-# 2) APK
+# 2) APK（脚本会自动找 JDK17 / Gradle8.9 / SDK）
 powershell -ExecutionPolicy Bypass -File mobile/scripts/build-apk.ps1 -Version 0.1.0
+
+# 只重打 APK、不重打 AAR
+powershell -ExecutionPolicy Bypass -File mobile/scripts/build-apk.ps1 -SkipAar
 ```
 
-产物：`app/build/outputs/apk/debug/app-debug.apk`。
+产物：
 
-> 没有 `gradlew.bat` 时，用 Android Studio 打开 `mobile/android`，或先执行
-> `gradle wrapper --gradle-version 8.9`。
+- `app/libs/mobilecore.aar`（gitignore，不入库）
+- `app/build/outputs/apk/debug/app-debug.apk`（约 26.7 MiB，arm64-v8a，debug 签名）
 
-## gomobile 生成物命名
+## 已验证的 gomobile API
 
-Go 包名是 `mobilecore`，gomobile 会生成：
+AAR 生成的是：
 
-- Java 类 `mobilecore.Mobilecore`，静态方法 `start(String, Notifier)` / `stop()`
-- Java 接口 `mobilecore.Notifier`，方法 `notify(...)` / `updateMonitorStatus(int)`
+```java
+public abstract class mobilecore.Mobilecore {
+  public static native String start(String dataDir, mobilecore.Notifier notifier) throws Exception;
+  public static native void stop();
+}
 
-如果升级 gomobile 后命名发生变化，按 `build/generated` 里的实际 Java 接口调整
-`AppNotifier.kt` 与 `MainActivity.kt`。
+public interface mobilecore.Notifier {
+  void notify(String title, String body, String payload);
+  void updateMonitorStatus(int active);
+}
+```
+
+Kotlin 侧 `AppNotifier` / `MainActivity` 已按此实现。
+
+## 常见问题
+
+**1. `gomobile bind` 报 `fatal error` / `morestack on g0`**
+- 项目里 pin 了 2019 年的 `golang.org/x/mobile`，与 2026 版 gomobile 不兼容。
+- 构建脚本会检查并执行 `go get golang.org/x/mobile@latest`。
+
+**2. `could not import ... (not the start of an archive file ...)`**
+- Go 构建缓存损坏（例如 D 盘掉线/构建中断）。
+- 执行：`powershell -File mobile/scripts/build-aar.ps1 -CleanCache`
+
+**3. Gradle 报 JDK 版本不支持**
+- Gradle 8.9 不支持 Android Studio 自带的 JDK 25；用 JDK 17/21。
+- 本机用 `D:\tools\jdk17`，`build-apk.ps1` 会自动探测。
+
+**4. `ANDROID_HOME` 含空格**
+- 用上面的 junction，并把 `ANDROID_HOME` 指向无空格路径。
 
 ## 首次安装后的设置（Honor / MagicOS）
 

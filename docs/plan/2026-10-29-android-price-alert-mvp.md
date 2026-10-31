@@ -405,7 +405,9 @@ cd frontend && npm run build
 - [x] WebView + NativeBridge。
 - [x] Foreground Service + 通知 + 开机广播。
 - [x] 保活引导页。
-- [ ] `assembleDebug` 构建（需本机安装 Android SDK/NDK + gomobile）。
+- [x] `assembleDebug` 构建（JDK 17 + SDK 34 + NDK 26.1 + Gradle 8.9）。
+- [x] gomobile AAR（arm64，12.1 MB，`-s -w`）。
+- [x] Debug APK（26.7 MiB）。
 
 ### M6 验收
 - [ ] 锁屏/后台/划掉任务触发通知（真机）。
@@ -441,6 +443,13 @@ cd frontend && npm run build
 
 - 2026-10-29：设计落盘，开始 M1。
 - 2026-10-29：M1-M4 完成；M5 代码完成，等待 Android SDK/NDK 构建。
+- 2026-10-31：D 盘恢复；补齐 SDK 34 / build-tools 34 / NDK 26.1；JDK 17 + Gradle 8.9 构建通过。
+  - 修复 `gomobile bind` 的两个坑：项目 pin 了 2019 版 `x/mobile`（升级到 2026 版）；D 盘掉线导致
+    Go 构建缓存损坏（`go clean -cache` 修复）。
+  - 生成 `mobilecore.aar`（12.1 MB，arm64-v8a；`-ldflags "-s -w"` 去掉符号后）。
+  - 修复 Kotlin `onNewIntent` 签名后，`assembleDebug` 成功，`app-debug.apk` 26.7 MiB。
+  - APK 校验：`com.aipanyi.mobile`，minSdk 26 / targetSdk 34，权限与 arm64 原生库齐全。
+  - 真机尚未连接（`adb devices` 为空），Honor 50 验收待做。
 
 ### 已验证（本机）
 
@@ -467,7 +476,7 @@ cd mobile/frontend && npm run build         # 移动端前端通过
 
 ### 待完成
 
-- 安装 Android SDK 34 / NDK 26 / gomobile，执行 `mobile/scripts/build-aar.ps1` + `build-apk.ps1`。
 - Honor 50 真机验收：前台/后台/锁屏/划掉任务/重启/强行停止；MagicOS 自启动与电池白名单。
+- 手机通过 USB 连接后：`adb install -r mobile/android/app/build/outputs/apk/debug/app-debug.apk`。
 - `mobile/core` 的测试二进制在本机被 Windows Defender 误判，CI 或关闭实时防护的机器可跑；
   纯逻辑测试已放在 `mobile/alerts`。

@@ -2,17 +2,17 @@ package mobilecore
 
 import "sync"
 
-// Notifier 是 Android 壳实现的系统通知出口。
+// Notifier is implemented by the Android shell to show system notifications.
 //
-// gomobile 会把该接口生成 Java 接口 mobilecore.Notifier，Kotlin 侧实现：
+// gomobile generates the Java interface mobilecore.Notifier. Kotlin implements:
 //
 //	override fun notify(title: String, body: String, payload: String)
 //	override fun updateMonitorStatus(active: Int)
 type Notifier interface {
-	// Notify 弹出一条价格提醒。payload 一般是股票代码，用于点击跳转。
+	// Notify posts a price alert. payload is usually the stock code.
 	Notify(title, body, payload string)
-	// UpdateMonitorStatus 更新常驻通知中的“监控中 N 条规则”。
-	// 用 int32 是为了让 gomobile 生成 Java int（Go int 会映射成 Java long）。
+	// UpdateMonitorStatus updates the ongoing notification's active rule count.
+	// int32 maps to Java int (Go int maps to Java long).
 	UpdateMonitorStatus(active int32)
 }
 
