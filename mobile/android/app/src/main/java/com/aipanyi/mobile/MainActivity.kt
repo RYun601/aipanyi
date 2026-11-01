@@ -146,10 +146,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onCoreReady(url: String) {
-        if (baseUrl != null) return
+        // Go core 可能因服务重启换成新端口；旧 WebView 继续 fetch 旧端口会全部失败。
+        if (!CoreUrl.shouldReload(baseUrl, url)) return
+        val firstLoad = baseUrl == null
         baseUrl = url
         handler.removeCallbacks(coreTimeout)
-        loadTarget()
+        if (firstLoad || !pendingStockCode.isNullOrBlank()) {
+            loadTarget()
+        } else {
+            reloadCurrentRoute(url)
+        }
+    }
+
+    private fun reloadCurrentRoute(url: String) {
+        val current = if (this::webView.isInitialized) webView.url else null
+        webView.loadUrl(CoreUrl.reloadUrl(url, current))
     }
 
     private fun loadTarget() {
