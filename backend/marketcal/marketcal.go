@@ -7,6 +7,7 @@ package marketcal
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -259,6 +260,8 @@ func PreCache(days int) {
 
 // IsTradingTimeForMarket 按市场代码返回对应交易时段判断。
 // market 取 A / HK / US；未知市场按 A 股处理。
+// IsTradingTimeForMarket 判断某市场在指定时间是否处于交易时段。
+// market 取 A / HK / US，未知市场按 A 股处理。
 func IsTradingTimeForMarket(market string, date time.Time) bool {
 	switch market {
 	case "HK":
@@ -268,4 +271,126 @@ func IsTradingTimeForMarket(market string, date time.Time) bool {
 	default:
 		return IsTradingTime(date)
 	}
+}
+
+// MonitorWindow 一个连续的监控窗口。
+type MonitorWindow struct {
+	Start time.Time
+	End   time.Time
+}
+
+var newYork = func() *time.Location {
+	if loc, err := time.LoadLocation("America/New_York"); err == nil {
+		return loc
+	}
+	return time.FixedZone("EST", -5*60*60)
+}()
+
+// IsHKTradingDay 导出港股交易日判断，供监控窗口计算使用。
+func IsHKTradingDay(date time.Time) bool { return isHKTradingDay(date) }
+
+// IsUSTradingDay 导出美股交易日判断，内部先转纽约时间。
+func IsUSTradingDay(date time.Time) bool {
+	return isUSTradingDay(date.In(newYork))
+}
+
+func nextSession(
+	now time.Time,
+	loc *time.Location,
+	startHour, startMin, endHour, endMin int,
+	isTradingDay func(time.Time) bool,
+) (time.Time, time.Time, bool) {
+	now = now.In(loc)
+	for i := 0; i <= 10; i++ {
+		day := now.AddDate(0, 0, i)
+		y, m, d := day.Date()
+		start := time.Date(y, m, d, startHour, startMin, 0, 0, loc)
+		end := time.Date(y, m, d, endHour, endMin, 0, 0, loc)
+		if !end.After(now) {
+			continue
+		}
+		if !isTradingDay(day) {
+			continue
+		}
+		return start, end, true
+	}
+	return time.Time{}, time.Time{}, false
+}
+
+// NextTradingSession 返回某市场当前或下一个交易窗口。
+func NextTradingSession(market string, now time.Time) (time.Time, time.Time, bool) {
+	switch market {
+	case "HK":
+		return nextSession(now, shanghai, 9, 0, 16, 10, IsHKTradingDay)
+	case "US":
+		return nextSession(now, newYork, 4, 0, 20, 0, IsUSTradingDay)
+	default:
+		return nextSession(now, shanghai, 9, 15, 15, 0, IsTradingDay)
+	}
+}
+
+func mergeMonitorWindows(in []MonitorWindow) []MonitorWindow {
+	if len(in) == 0 {
+		return nil
+	}
+	windows := append([]MonitorWindow(nil), in...)
+	sort.Slice(windows, func(i, j int) bool {
+		return windows[i].Start.Before(windows[j].Start)
+	})
+	out := []MonitorWindow{windows[0]}
+	for _, w := range windows[1:] {
+		last := &out[len(out)-1]
+		if !w.Start.After(last.End) {
+			if w.End.After(last.End) {
+				last.End = w.End
+			}
+			continue
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
+// NextMonitorWindow 返回包含 now 的窗口；都不包含时返回最早开始的未来窗口。
+func NextMonitorWindow(markets []string, now time.Time) (MonitorWindow, bool) {
+	windows := make([]MonitorWindow, 0, len(markets))
+	seen := make(map[string]bool, len(markets))
+	for _, market := range markets {
+		market = strings.ToUpper(strings.TrimSpace(market))
+		if market == "" || seen[market] {
+			continue
+		}
+		seen[market] = true
+		start, end, ok := NextTradingSession(market, now)
+		if ok {
+			windows = append(windows, MonitorWindow{Start: start, End: end})
+		}
+	}
+	if len(windows) == 0 {
+		return MonitorWindow{}, false
+	}
+	merged := mergeMonitorWindows(windows)
+	for _, w := range merged {
+		if !w.Start.After(now) && !w.End.Before(now) {
+			return w, true
+		}
+	}
+	for _, w := range merged {
+		if w.Start.After(now) {
+			return w, true
+		}
+	}
+	return MonitorWindow{}, false
+}
+
+// NextMonitorWindowAfter 返回 after 之后的下一个窗口；after 在窗口内时从该窗口结束处继续找。
+func NextMonitorWindowAfter(markets []string, after time.Time) (MonitorWindow, bool) {
+	w, ok := NextMonitorWindow(markets, after)
+	if !ok {
+		return MonitorWindow{}, false
+	}
+	if w.Start.After(after) {
+		return w, true
+	}
+	return NextMonitorWindow(markets, w.End)
 }

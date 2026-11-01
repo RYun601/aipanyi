@@ -1,36 +1,127 @@
 package com.aipanyi.mobile
 
-import android.app.AlarmManager
-import android.app.PendingIntent
 import android.app.Service
-import android.content.Context
 import android.content.Intent
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Log
 
-/**
- * 前台服务：保活 + 常驻通知。
- *
- * Go 核心（本地 HTTP + 提醒引擎）跑在这个进程里；服务在前台，系统不会因为
- * Activity 退到后台就立刻回收进程。真正是否被杀仍取决于 ROM，设置页会给用户
- * 白名单/自启动的引导。
- */
 class MonitorService : Service() {
     private val notifier by lazy { AppNotifier(applicationContext) }
+    private val handler = Handler(Looper.getMainLooper())
 
     @Volatile
     private var coreUrl: String? = null
 
+    @Volatile
+    private var uiVisible = false
+
+    @Volatile
+    private var stopping = false
+
+    @Volatile
+    private var waitingForSchedule = false
+
+    private var stopRunnable: Runnable? = null
+    private var alarmTimeout: Runnable? = null
+
     override fun onCreate() {
         super.onCreate()
+        RuntimeLog.init(this)
+        instance = this
+        isRunning = true
+        RuntimeLog.info(TAG, "service onCreate")
         NotificationHelper.ensureChannels(this)
         startForeground(
             NotificationHelper.ONGOING_ID,
             NotificationHelper.buildOngoing(this, activeCount())
         )
+
         Thread {
             try {
+                RuntimeLog.info(TAG, "core starting dataDir=${filesDir.absolutePath}")
                 val url = mobilecore.Mobilecore.start(filesDir.absolutePath, notifier)
+                if (stopping) {
+                    RuntimeLog.info(TAG, "core started after stop request, stopping core")
+                    mobilecore.Mobilecore.stop()
+                    return@Thread
+                }
+                coreUrl = url
+                getSharedPreferences(AppNotifier.PREFS, MODE_PRIVATE)
+                    .edit()
+                    .putString(AppNotifier.KEY_URL, url)
+                    .commit()
+                RuntimeLog.info(TAG, "core started url=$url")
+                sendCoreReady(url)
+                if (!waitingForSchedule) {
+                    scheduleStopFromPrefs()
+                }
+            } catch (t: Throwable) {
+                RuntimeLog.error(TAG, "start mobile core failed", t)
+                Log.e(TAG, "start mobile core failed", t)
+            }
+        }.start()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        RuntimeLog.init(this)
+        val action = intent?.action ?: "null"
+        RuntimeLog.info(TAG, "onStartCommand action=$action uiVisible=$uiVisible")
+
+        when (action) {
+            ACTION_UI_VISIBLE -> {
+                uiVisible = true
+                RuntimeLog.info(TAG, "ui visible")
+            }
+            ACTION_UI_HIDDEN -> {
+                uiVisible = false
+                RuntimeLog.info(TAG, "ui hidden")
+                stopIfIdle("ui_hidden")
+            }
+            ACTION_EXIT -> {
+                RuntimeLog.info(TAG, "manual exit action")
+                stopForExit()
+                return START_NOT_STICKY
+            }
+            ACTION_SCHEDULE_CHANGED -> {
+                scheduleStopFromPrefs()
+                stopIfIdle("schedule_changed")
+            }
+            ACTION_ALARM_START -> {
+                // 这个闹钟是给“下一个窗口”用的；此时 SharedPreferences 里仍是上一个窗口的
+                // start/end，不能按旧窗口立即停止。等 Go 核心启动/刷新后通过
+                // UpdateMonitorSchedule 写入新窗口。
+                stopRunnable?.let { handler.removeCallbacks(it) }
+                stopRunnable = null
+                uiVisible = false
+                waitingForSchedule = true
+                RuntimeLog.info(TAG, "alarm start; waiting for Go schedule")
+                startAlarmTimeout()
+                refreshCoreForAlarm()
+            }
+            else -> {
+                scheduleStopFromPrefs()
+                stopIfIdle("sticky_restart")
+            }
+        }
+
+        coreUrl?.let { sendCoreReady(it) }
+        if (!waitingForSchedule) {
+            scheduleStopFromPrefs()
+        }
+        return START_STICKY
+    }
+
+    private fun refreshCoreForAlarm() {
+        Thread {
+            try {
+                RuntimeLog.info(TAG, "refresh core for alarm")
+                val url = mobilecore.Mobilecore.start(filesDir.absolutePath, notifier)
+                if (stopping) {
+                    mobilecore.Mobilecore.stop()
+                    return@Thread
+                }
                 coreUrl = url
                 getSharedPreferences(AppNotifier.PREFS, MODE_PRIVATE)
                     .edit()
@@ -38,15 +129,77 @@ class MonitorService : Service() {
                     .commit()
                 sendCoreReady(url)
             } catch (t: Throwable) {
-                Log.e(TAG, "start mobile core failed", t)
+                RuntimeLog.error(TAG, "refresh core for alarm failed", t)
             }
         }.start()
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Activity 可能在核心已启动后才重新打开；把当前地址再发一次，避免 WebView 等待超时。
-        coreUrl?.let { sendCoreReady(it) }
-        return START_STICKY
+    private fun startAlarmTimeout() {
+        alarmTimeout?.let { handler.removeCallbacks(it) }
+        val runnable = Runnable {
+            if (waitingForSchedule) {
+                waitingForSchedule = false
+                RuntimeLog.warn(TAG, "no schedule received after alarm, stopping")
+                stopIfIdle("alarm_schedule_timeout")
+            }
+        }
+        alarmTimeout = runnable
+        handler.postDelayed(runnable, 120_000L)
+    }
+
+    private fun scheduleStopFromPrefs() {
+        if (waitingForSchedule) return
+        val prefs = getSharedPreferences(AppNotifier.PREFS, MODE_PRIVATE)
+        val end = prefs.getLong(AppNotifier.KEY_WINDOW_END, 0)
+        stopRunnable?.let { handler.removeCallbacks(it) }
+        stopRunnable = null
+        if (end <= 0) return
+
+        val delay = end - System.currentTimeMillis()
+        val runnable = Runnable {
+            RuntimeLog.info(TAG, "window end reached end=${formatTime(end)}")
+            stopIfIdle("window_end")
+        }
+        stopRunnable = runnable
+        if (delay <= 0) {
+            RuntimeLog.info(TAG, "window already ended")
+            handler.post(runnable)
+        } else {
+            RuntimeLog.info(TAG, "stop timer scheduled delayMs=$delay")
+            handler.postDelayed(runnable, delay)
+        }
+    }
+
+    private fun stopIfIdle(reason: String) {
+        if (uiVisible) {
+            RuntimeLog.info(TAG, "keep service reason=$reason uiVisible=true")
+            return
+        }
+        if (MonitorScheduler.isInWindow(this)) {
+            RuntimeLog.info(TAG, "keep service reason=$reason inside window")
+            return
+        }
+        stopInternal(reason)
+    }
+
+    private fun stopForExit() {
+        stopInternal("manual_exit")
+    }
+
+    private fun stopInternal(reason: String) {
+        if (stopping) return
+        stopping = true
+        waitingForSchedule = false
+        alarmTimeout?.let { handler.removeCallbacks(it) }
+        alarmTimeout = null
+        RuntimeLog.info(TAG, "stop service reason=$reason")
+        try {
+            mobilecore.Mobilecore.stop()
+        } catch (t: Throwable) {
+            RuntimeLog.error(TAG, "stop mobile core failed", t)
+        }
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     private fun sendCoreReady(url: String) {
@@ -56,24 +209,30 @@ class MonitorService : Service() {
                 .putExtra(AppNotifier.KEY_URL, url)
             sendBroadcast(ready)
         } catch (t: Throwable) {
-            Log.w(TAG, "send core ready failed", t)
+            RuntimeLog.error(TAG, "send core ready failed", t)
         }
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // 部分 ROM 划掉最近任务会连服务一起清；1 秒后用非精确闹钟尝试拉起。
-        try {
-            val restart = Intent(applicationContext, MonitorService::class.java)
-            val pi = PendingIntent.getService(
-                applicationContext, 1, restart,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            am.set(AlarmManager.RTC, System.currentTimeMillis() + 1000, pi)
-        } catch (t: Throwable) {
-            Log.w(TAG, "schedule restart failed", t)
-        }
+        RuntimeLog.info(TAG, "onTaskRemoved uiVisible=$uiVisible")
+        stopIfIdle("task_removed")
         super.onTaskRemoved(rootIntent)
+    }
+
+    override fun onDestroy() {
+        RuntimeLog.info(TAG, "service onDestroy")
+        stopRunnable?.let { handler.removeCallbacks(it) }
+        alarmTimeout?.let { handler.removeCallbacks(it) }
+        handler.removeCallbacksAndMessages(null)
+        try {
+            mobilecore.Mobilecore.stop()
+        } catch (t: Throwable) {
+            RuntimeLog.error(TAG, "onDestroy stop core failed", t)
+        }
+        instance = null
+        isRunning = false
+        MonitorScheduler.scheduleNext(applicationContext, "service_destroy")
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -82,7 +241,36 @@ class MonitorService : Service() {
         getSharedPreferences(AppNotifier.PREFS, MODE_PRIVATE)
             .getInt(AppNotifier.KEY_ACTIVE, 0)
 
+    private fun formatTime(ms: Long): String =
+        java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+            .format(java.util.Date(ms))
+
     companion object {
-        private const val TAG = "MonitorService"
+        const val TAG = "MonitorService"
+        const val ACTION_UI_VISIBLE = "com.aipanyi.mobile.UI_VISIBLE"
+        const val ACTION_UI_HIDDEN = "com.aipanyi.mobile.UI_HIDDEN"
+        const val ACTION_EXIT = "com.aipanyi.mobile.EXIT"
+        const val ACTION_SCHEDULE_CHANGED = "com.aipanyi.mobile.SCHEDULE_CHANGED"
+        const val ACTION_ALARM_START = "com.aipanyi.mobile.ALARM_START"
+
+        @Volatile
+        var instance: MonitorService? = null
+            private set
+
+        @Volatile
+        var isRunning: Boolean = false
+            private set
+
+        fun onScheduleChanged() {
+            instance?.let {
+                it.handler.post {
+                    it.waitingForSchedule = false
+                    it.alarmTimeout?.let { r -> it.handler.removeCallbacks(r) }
+                    it.alarmTimeout = null
+                    it.scheduleStopFromPrefs()
+                    it.stopIfIdle("schedule_changed")
+                }
+            }
+        }
     }
 }

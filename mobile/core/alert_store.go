@@ -125,6 +125,7 @@ func saveAlert(in alertDTO) (int64, error) {
 			return 0, err
 		}
 		updateMonitorStatus(lenAlertsEnabled())
+		scheduleMonitorRefresh()
 		return int64(existing.ID), nil
 	}
 
@@ -161,6 +162,7 @@ func saveAlert(in alertDTO) (int64, error) {
 		go applyInitialAlertState(a)
 	}
 	updateMonitorStatus(lenAlertsEnabled())
+	scheduleMonitorRefresh()
 	return int64(a.ID), nil
 }
 
@@ -203,6 +205,7 @@ func deleteAlert(id int64) (string, error) {
 		return "", err
 	}
 	updateMonitorStatus(lenAlertsEnabled())
+	scheduleMonitorRefresh()
 	return "删除成功", nil
 }
 
@@ -219,6 +222,7 @@ func setAlertEnabled(id int64, enabled bool) (string, error) {
 		return "", err
 	}
 	updateMonitorStatus(lenAlertsEnabled())
+	scheduleMonitorRefresh()
 	return "设置成功", nil
 }
 

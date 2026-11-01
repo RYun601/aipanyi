@@ -48,6 +48,7 @@ func Start(dataDir string, n Notifier) (string, error) {
 	if started && server != nil {
 		// 进程内重复调用：只更新 notifier（Activity 重建后通知回调对象会变）。
 		setNotifier(n)
+		scheduleMonitorRefresh()
 		return server.URL(), nil
 	}
 	if dataDir == "" {
@@ -109,6 +110,7 @@ func Start(dataDir string, n Notifier) (string, error) {
 	go engine.run(ctx)
 
 	started = true
+	scheduleMonitorRefresh()
 	logger.SugaredLogger.Infof("mobile: started at %s (version=%s)", baseURL, buildVersion)
 	return baseURL, nil
 }

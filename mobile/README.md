@@ -77,8 +77,9 @@ powershell -ExecutionPolicy Bypass -File mobile/scripts/build-apk.ps1
 
 - [x] `mobile/alerts`：above/below 状态机、unknown 初始化、AI 建议解析/校验 + 单测
 - [x] `mobile/core`：SQLite、股票基础表导入、自选、AI 配置/提示词、AI 流、提醒 CRUD、提醒引擎、HTTP 门面
+- [x] `mobile/core`：运行时文件归拢到 `filesDir/aipanyi/`，按启用提醒市场下发交易窗口调度
 - [x] `mobile/frontend`：自选、个股、提醒、设置四个页面，Vite 构建通过
-- [x] `mobile/android`：WebView、前台服务、通知渠道、开机广播、原生设置桥
+- [x] `mobile/android`：WebView、前台服务、通知渠道、开机广播、原生设置桥、交易窗口闹钟、运行日志
 - [x] gomobile AAR（12.1 MB，arm64-v8a，`-s -w`）
 - [x] Debug APK（26.7 MiB，`app/build/outputs/apk/debug/app-debug.apk`）
 - [ ] 真机验收（Honor 50 / MagicOS 8）
@@ -86,6 +87,7 @@ powershell -ExecutionPolicy Bypass -File mobile/scripts/build-apk.ps1
 ## 已知限制
 
 - 价格提醒是分钟级（默认 30 秒轮询），不是逐笔条件单。
+- 后台只在已启用提醒涉及市场的交易时段运行；非交易时段自动停止，下一个窗口自动启动。
 - 用户强行停止 App 后，本地服务/通知无法自动恢复，这是 Android 限制。
 - MagicOS 需要手动允许自启动/后台活动；仍可能被清理。
 - 手机端使用独立 SQLite；桌面配置迁移尚未实现（第二阶段导出/导入）。

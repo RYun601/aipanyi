@@ -14,6 +14,9 @@ type Notifier interface {
 	// UpdateMonitorStatus updates the ongoing notification's active rule count.
 	// int32 maps to Java int (Go int maps to Java long).
 	UpdateMonitorStatus(active int32)
+	// UpdateMonitorSchedule 下发当前/下一个监控窗口，Unix 毫秒；0 表示没有。
+	// int64 在 gomobile 中映射成 Java long，避免 2038 年问题。
+	UpdateMonitorSchedule(startMs, endMs, nextStartMs int64)
 }
 
 var (
@@ -49,4 +52,13 @@ func updateMonitorStatus(active int) {
 	}
 	defer func() { _ = recover() }()
 	n.UpdateMonitorStatus(int32(active))
+}
+
+func sendMonitorSchedule(startMs, endMs, nextStartMs int64) {
+	n := currentNotifier()
+	if n == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	n.UpdateMonitorSchedule(startMs, endMs, nextStartMs)
 }

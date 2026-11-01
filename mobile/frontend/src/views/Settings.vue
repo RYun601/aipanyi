@@ -51,7 +51,8 @@ const promptForm = reactive({ id: 0, name: '', type: 'stock', content: '' })
 const nativeState = reactive({
   isNative: false,
   notifications: false,
-  ignoringBattery: false
+  ignoringBattery: false,
+  exactAlarms: false
 })
 
 const aiOptions = computed(() =>
@@ -98,6 +99,7 @@ function refreshNative() {
   if (!nativeState.isNative) return
   nativeState.notifications = native.notificationsEnabled()
   nativeState.ignoringBattery = native.isIgnoringBatteryOptimizations()
+  nativeState.exactAlarms = native.canScheduleExactAlarms()
 }
 
 async function sendTestNotification() {
@@ -349,6 +351,23 @@ function openAutoStart() {
   native.openAutoStartSettings()
 }
 
+function openExactAlarmSettings() {
+  native.requestExactAlarmPermission()
+  setTimeout(refreshNative, 1500)
+}
+
+async function confirmExit() {
+  try {
+    await showConfirmDialog({
+      title: '退出应用',
+      message: '将立即停止后台监控；下一个交易窗口仍会按已启用提醒自动启动。'
+    })
+  } catch {
+    return
+  }
+  native.exitApp()
+}
+
 onMounted(load)
 </script>
 
@@ -468,6 +487,22 @@ onMounted(load)
               <van-button size="small" plain type="primary" @click="openBatterySettings">去设置</van-button>
             </template>
           </van-cell>
+          <van-cell
+            title="精确闹钟"
+            :label="nativeState.exactAlarms ? '已授权，交易窗口可准时启动' : '未授权，系统可能延迟启动'"
+            center
+          >
+            <template #right-icon>
+              <van-button
+                size="small"
+                plain
+                type="primary"
+                @click="openExactAlarmSettings"
+              >
+                {{ nativeState.exactAlarms ? '已开启' : '去开启' }}
+              </van-button>
+            </template>
+          </van-cell>
           <van-cell title="测试通知" label="发一条价格提醒，检查通知权限和渠道" center>
             <template #right-icon>
               <van-button size="small" plain type="primary" @click="sendTestNotification">发送</van-button>
@@ -479,10 +514,21 @@ onMounted(load)
             </template>
           </van-cell>
           <div class="hint" style="margin-top: 10px">
-            建议：设置 → 应用 → 应用启动管理 → AI盘译 → 手动管理，允许自启动、关联启动、后台活动；
-            App 已从最近任务隐藏，避免被划掉；从桌面图标或常驻通知打开。即使这样，系统仍可能清理，无法保证 100% 准时。
+            后台只在已启用提醒涉及的市场交易时段运行；非交易时段自动停止，下个窗口自动启动。
+            当前启用市场由提醒规则决定（A 股 / 港股 / 美股）。
+            设置 → 应用 → 应用启动管理 → AI盘译 → 手动管理，允许自启动、关联启动、后台活动。
           </div>
           <van-button size="small" plain style="margin-top: 10px" @click="refreshNative">刷新状态</van-button>
+          <van-button
+            type="danger"
+            plain
+            block
+            round
+            style="margin-top: 12px"
+            @click="confirmExit"
+          >
+            退出应用
+          </van-button>
         </template>
       </div>
 
