@@ -17,6 +17,16 @@ const showPromptEditor = ref(false)
 const showAiPicker = ref(false)
 const showPromptPicker = ref(false)
 const showAdvancedAi = ref(false)
+const showModelPicker = ref(false)
+const modelKeyword = ref('')
+const modelOptions = ref([])
+const fetchingModels = ref(false)
+const fetchingModelInfo = ref(false)
+const filteredModelOptions = computed(() => {
+  const keyword = modelKeyword.value.trim().toLowerCase()
+  if (!keyword) return modelOptions.value
+  return modelOptions.value.filter((m) => m.toLowerCase().includes(keyword))
+})
 
 const aiForm = reactive({
   id: 0,
@@ -132,6 +142,70 @@ function resetAiForm(c) {
     supportVision: !!c?.supportVision
   })
   showAdvancedAi.value = false
+  modelOptions.value = []
+  modelKeyword.value = ''
+  showModelPicker.value = false
+}
+
+async function fetchModels() {
+  if (!aiForm.baseUrl.trim() || !aiForm.apiKey.trim()) {
+    showToast('请先填写 BaseUrl 和 API Key')
+    return
+  }
+  fetchingModels.value = true
+  try {
+    const list = await api.fetchAiModels(aiForm.baseUrl, aiForm.apiKey, aiForm.extraHeaders)
+    const options = Array.isArray(list) ? list : []
+    if (!options.length) {
+      showToast('未获取到模型，请检查地址、API Key 或服务是否实现 /models')
+      return
+    }
+    modelOptions.value = options
+    modelKeyword.value = ''
+    showModelPicker.value = true
+  } catch (e) {
+    showToast(e?.message || '获取模型失败')
+  } finally {
+    fetchingModels.value = false
+  }
+}
+
+async function pickModel(model) {
+  aiForm.modelName = model
+  if (!aiForm.name.trim()) aiForm.name = model
+  showModelPicker.value = false
+  await fillModelInfo()
+}
+
+async function fillModelInfo() {
+  if (!aiForm.modelName.trim() || !aiForm.baseUrl.trim()) return
+  fetchingModelInfo.value = true
+  try {
+    const info = await api.fetchAiModelInfo(
+      aiForm.baseUrl,
+      aiForm.apiKey,
+      aiForm.modelName,
+      aiForm.extraHeaders
+    )
+    if (!info) return
+    const parts = []
+    if (info.maxTokens > 0) {
+      aiForm.maxTokens = info.maxTokens
+      parts.push(`最大输出 ${info.maxTokens}`)
+    }
+    if (info.contextWindow > 0) {
+      aiForm.contextWindow = info.contextWindow
+      parts.push(`上下文 ${info.contextWindow}`)
+    }
+    if (parts.length) {
+      const source = info.source === 'api' ? '接口' : '内置数据'
+      showToast(`已自动填充：${parts.join('，')}（来源：${source}）`)
+    }
+  } catch (e) {
+    showToast(e?.message || '获取模型参数失败')
+  } finally {
+    fetchingModelInfo.value = false
+  }
 }
 
 function addAi() {
@@ -444,22 +518,40 @@ onMounted(load)
           <van-field v-model="aiForm.name" label="名称" placeholder="例如 DeepSeek" />
           <van-field v-model="aiForm.baseUrl" label="BaseUrl" placeholder="https://api.deepseek.com/v1" />
           <van-field v-model="aiForm.apiKey" type="password" label="API Key" placeholder="留空则保留原 Key" />
-          <van-field v-model="aiForm.modelName" label="模型名" placeholder="deepseek-chat" />
-          <van-field v-model="aiForm.modelType" label="类型" placeholder="chat / embedding" />
-          <van-field v-model="aiForm.maxTokens" type="number" label="MaxTokens" input-align="right" />
-          <van-field v-model="aiForm.temperature" type="number" label="Temperature" input-align="right" />
-          <van-field v-model="aiForm.timeOut" type="number" label="超时(秒)" input-align="right" />
+          <van-field
+            v-model="aiForm.modelName"
+            label="模型名"
+            placeholder="选择模型或手动输入"
+            @blur="fillModelInfo"
+          >
+            <template #button>
+              <van-button size="small" type="primary" plain :loading="fetchingModels" @click="fetchModels">
+                获取模型
+              </van-button>
+            </template>
+          </van-field>
+          <van-cell title="深度思考" center>
+            <template #right-icon>
+              <van-switch v-model="aiForm.thinking" size="22px" />
+            </template>
+          </van-cell>
         </van-cell-group>
 
-        <van-cell title="高级选项" is-link :arrow-direction="showAdvancedAi ? 'up' : 'down'" @click="showAdvancedAi = !showAdvancedAi" />
+        <van-cell
+          title="高级参数"
+          is-link
+          :arrow-direction="showAdvancedAi ? 'up' : 'down'"
+          @click="showAdvancedAi = !showAdvancedAi"
+        />
         <van-cell-group v-if="showAdvancedAi" inset>
+          <van-field v-model="aiForm.modelType" label="类型" placeholder="chat / embedding" />
+          <van-field v-model="aiForm.maxTokens" type="number" label="MaxTokens" input-align="right" />
           <van-field v-model="aiForm.contextWindow" type="number" label="上下文窗口" input-align="right" />
+          <van-field v-model="aiForm.temperature" type="number" label="Temperature" input-align="right" />
+          <van-field v-model="aiForm.timeOut" type="number" label="超时(秒)" input-align="right" />
           <van-field v-model="aiForm.httpProxy" label="HTTP 代理" placeholder="http://127.0.0.1:7890" />
           <van-cell title="启用代理" center>
             <template #right-icon><van-switch v-model="aiForm.httpProxyEnabled" size="22px" /></template>
-          </van-cell>
-          <van-cell title="深度思考" center>
-            <template #right-icon><van-switch v-model="aiForm.thinking" size="22px" /></template>
           </van-cell>
           <van-cell title="支持图片" center>
             <template #right-icon><van-switch v-model="aiForm.supportVision" size="22px" /></template>
@@ -476,6 +568,23 @@ onMounted(load)
         <div class="row" style="margin-top: 14px">
           <van-button plain block round :loading="testing" @click="testAi">测试连接</van-button>
           <van-button type="primary" block round @click="saveAi">保存</van-button>
+        </div>
+      </div>
+    </van-popup>
+
+    <van-popup v-model:show="showModelPicker" position="bottom" round style="height: 70vh">
+      <div class="sheet" style="height: 100%; display: flex; flex-direction: column">
+        <div class="sheet-title">选择模型</div>
+        <van-search v-model="modelKeyword" placeholder="搜索模型" />
+        <div style="flex: 1; overflow-y: auto">
+          <van-cell
+            v-for="m in filteredModelOptions"
+            :key="m"
+            :title="m"
+            is-link
+            @click="pickModel(m)"
+          />
+          <van-empty v-if="!filteredModelOptions.length" description="没有匹配的模型" />
         </div>
       </div>
     </van-popup>

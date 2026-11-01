@@ -245,6 +245,23 @@ func (a *mobileApp) TestAIConfig(cfg aiConfigDTO) (string, error) {
 	return "连接成功：" + strings.TrimSpace(content), nil
 }
 
+func (a *mobileApp) FetchAiModels(baseUrl, apiKey, extraHeaders string) []string {
+	return data.FetchAiModels(baseUrl, apiKey, extraHeaders)
+}
+
+func (a *mobileApp) FetchAiModelInfo(baseUrl, apiKey, modelName, extraHeaders string) *aiModelInfoDTO {
+	info := data.FetchAiModelInfo(baseUrl, apiKey, modelName, extraHeaders)
+	if info == nil {
+		return nil
+	}
+	return &aiModelInfoDTO{
+		ModelName:     info.ModelName,
+		MaxTokens:     info.MaxTokens,
+		ContextWindow: info.ContextWindow,
+		Source:        info.Source,
+	}
+}
+
 // ---------------- 系统提示词 ----------------
 
 func (a *mobileApp) ListPrompts() []promptDTO {

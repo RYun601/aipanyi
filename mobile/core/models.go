@@ -150,6 +150,13 @@ type aiConfigDTO struct {
 	SupportVision    bool    `json:"supportVision"`
 }
 
+type aiModelInfoDTO struct {
+	ModelName     string `json:"modelName"`
+	MaxTokens     int    `json:"maxTokens"`
+	ContextWindow int    `json:"contextWindow"`
+	Source        string `json:"source"`
+}
+
 type promptDTO struct {
 	ID      int64  `json:"id"`
 	Name    string `json:"name"`

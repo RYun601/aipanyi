@@ -1,6 +1,15 @@
 package main
 
 import (
+	"aipanyi/backend/agent"
+	"aipanyi/backend/agent/tools"
+	"aipanyi/backend/appinfo"
+	"aipanyi/backend/data"
+	"aipanyi/backend/db"
+	"aipanyi/backend/logger"
+	"aipanyi/backend/machineid"
+	"aipanyi/backend/marketcal"
+	"aipanyi/backend/models"
 	"archive/zip"
 	"bytes"
 	"context"
@@ -8,15 +17,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"aipanyi/backend/agent"
-	"aipanyi/backend/appinfo"
-	"aipanyi/backend/agent/tools"
-	"aipanyi/backend/data"
-	"aipanyi/backend/db"
-	"aipanyi/backend/logger"
-	"aipanyi/backend/machineid"
-	"aipanyi/backend/marketcal"
-	"aipanyi/backend/models"
 	"io"
 	"os"
 	"path/filepath"
@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/assert/yaml"
 	"golang.org/x/exp/slices"
 
+	"aipanyi/backend/events"
 	"github.com/coocood/freecache"
 	"github.com/duke-git/lancet/v2/convertor"
 	"github.com/duke-git/lancet/v2/mathutil"
@@ -39,7 +40,6 @@ import (
 	"github.com/duke-git/lancet/v2/strutil"
 	"github.com/robfig/cron/v3"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
-	"aipanyi/backend/events"
 )
 
 // App struct
@@ -3115,46 +3115,7 @@ func (a *App) SaveAiAssistantSession(sessionId string, messages []models.AiAssis
 //	@param extraHeaders 自定义 HTTP Header（JSON 格式字符串，可为空）
 //	@return []string 模型 ID 列表
 func (a *App) FetchAiModels(baseUrl, apiKey, extraHeaders string) []string {
-	baseUrl = strutil.Trim(baseUrl)
-	apiKey = strutil.Trim(apiKey)
-	if baseUrl == "" || apiKey == "" {
-		return []string{}
-	}
-
-	type modelItem struct {
-		ID string `json:"id"`
-	}
-	var respData struct {
-		Data []modelItem `json:"data"`
-	}
-
-	client := data.SharedHTTPClient
-	client.SetBaseURL(baseUrl)
-
-	req := client.R().
-		SetHeader("Authorization", "Bearer "+apiKey).
-		SetHeader("Content-Type", "application/json").
-		SetResult(&respData)
-	if extra := data.BuildExtraHeaders(extraHeaders, ""); len(extra) > 0 {
-		req = req.SetHeaders(extra)
-	}
-	resp, err := req.Get("/models")
-	if err != nil {
-		logger.SugaredLogger.Errorf("FetchAiModels error: %v", err)
-		return []string{}
-	}
-	if resp.IsError() {
-		logger.SugaredLogger.Errorf("FetchAiModels http error: %s", resp.Status())
-		return []string{}
-	}
-
-	modelsList := make([]string, 0, len(respData.Data))
-	for _, m := range respData.Data {
-		if strings.TrimSpace(m.ID) != "" {
-			modelsList = append(modelsList, m.ID)
-		}
-	}
-	return modelsList
+	return data.FetchAiModels(baseUrl, apiKey, extraHeaders)
 }
 
 type AiModelInfo struct {
@@ -3165,80 +3126,16 @@ type AiModelInfo struct {
 }
 
 func (a *App) FetchAiModelInfo(baseUrl, apiKey, modelName, extraHeaders string) *AiModelInfo {
-	baseUrl = strutil.Trim(baseUrl)
-	modelName = strutil.Trim(modelName)
-	if baseUrl == "" || modelName == "" {
+	info := data.FetchAiModelInfo(baseUrl, apiKey, modelName, extraHeaders)
+	if info == nil {
 		return nil
 	}
-
-	info := &AiModelInfo{
-		ModelName:     modelName,
-		MaxTokens:     0,
-		ContextWindow: 0,
-		Source:        "",
+	return &AiModelInfo{
+		ModelName:     info.ModelName,
+		MaxTokens:     info.MaxTokens,
+		ContextWindow: info.ContextWindow,
+		Source:        info.Source,
 	}
-
-	if apiKey != "" {
-		type modelDetail struct {
-			ID             string `json:"id"`
-			MaxContextLen  int    `json:"max_context_length"`
-			ContextLength  int    `json:"context_length"`
-			MaxOutputTok   int    `json:"max_output_tokens"`
-			MaxTokensField int    `json:"max_tokens"`
-		}
-		var detail modelDetail
-
-		client := data.SharedHTTPClient
-		client.SetBaseURL(baseUrl)
-
-		req := client.R().
-			SetHeader("Authorization", "Bearer "+apiKey).
-			SetHeader("Content-Type", "application/json").
-			SetResult(&detail)
-		if extra := data.BuildExtraHeaders(extraHeaders, ""); len(extra) > 0 {
-			req = req.SetHeaders(extra)
-		}
-		resp, err := req.Get("/models/" + modelName)
-
-		if err == nil && !resp.IsError() && detail.ID != "" {
-			// 上下文窗口：优先 max_context_length，其次 context_length
-			if detail.MaxContextLen > 0 {
-				info.ContextWindow = detail.MaxContextLen
-				info.Source = "api"
-			} else if detail.ContextLength > 0 {
-				info.ContextWindow = detail.ContextLength
-				info.Source = "api"
-			}
-			// 输出上限：优先 max_output_tokens，其次 max_tokens
-			if detail.MaxOutputTok > 0 {
-				info.MaxTokens = detail.MaxOutputTok
-				info.Source = "api"
-			} else if detail.MaxTokensField > 0 {
-				info.MaxTokens = detail.MaxTokensField
-				info.Source = "api"
-			}
-		}
-	}
-
-	// 兜底：从内置模型表补全未获取到的字段
-	if info.ContextWindow == 0 {
-		if cw := agent.GetBuiltinModelContextWindow(modelName); cw > 0 {
-			info.ContextWindow = cw
-			if info.Source == "" {
-				info.Source = "builtin"
-			}
-		}
-	}
-	if info.MaxTokens == 0 {
-		if mo := agent.GetBuiltinModelMaxOutput(modelName); mo > 0 {
-			info.MaxTokens = mo
-			if info.Source == "" {
-				info.Source = "builtin"
-			}
-		}
-	}
-
-	return info
 }
 
 // InitCronTasks 在应用启动时，自动为启用状态的定时任务创建调度
@@ -4409,9 +4306,9 @@ func (a *App) ImportSkillPackage() string {
 		return "未选择文件"
 	}
 
-
 	return importSkillPackageFromZip(zipPath)
 }
+
 // importSkillPackageFromZip 执行技能包 ZIP 的解压与校验（无对话框依赖，两种模式共用）。
 func importSkillPackageFromZip(zipPath string) string {
 	// 读取 zip 文件
@@ -4525,7 +4422,6 @@ func importSkillPackageFromZip(zipPath string) string {
 	logger.SugaredLogger.Infof("技能包导入成功: %s -> %s", skillDirName, targetDir)
 	return "技能 '" + skillDirName + "' 导入成功"
 }
-
 
 // ListFilesystemSkills
 //
