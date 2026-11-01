@@ -1,7 +1,7 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { showToast } from 'vant'
+import { showConfirmDialog, showToast } from 'vant'
 import { api } from '../api'
 import { changeClass, fmtPercent, fmtPrice, fmtSignedMoney } from '../format'
 
@@ -14,6 +14,7 @@ const showSearch = ref(false)
 const keyword = ref('')
 const searchLoading = ref(false)
 const results = ref([])
+const removing = ref('')
 let timer = null
 let searchTimer = null
 
@@ -83,6 +84,27 @@ function marketLabel(m) {
   return m === 'HK' ? '港股' : m === 'US' ? '美股' : 'A股'
 }
 
+async function removeItem(item) {
+  try {
+    await showConfirmDialog({
+      title: '删除自选',
+      message: `确定删除「${item.name || item.code}」吗？删除后该股票的价格提醒会同步停用。`
+    })
+  } catch {
+    return
+  }
+  removing.value = item.code
+  try {
+    await api.removeStock(item.code)
+    items.value = items.value.filter((x) => x.code !== item.code)
+    showToast('已删除')
+  } catch (e) {
+    showToast(e?.message || '删除失败')
+  } finally {
+    removing.value = ''
+  }
+}
+
 onMounted(() => {
   load()
   timer = setInterval(() => {
@@ -113,27 +135,39 @@ onBeforeUnmount(() => {
         <van-button type="primary" round size="small" @click="openSearch">添加股票</van-button>
       </van-empty>
 
-      <div v-for="item in items" :key="item.code" class="stock-item" @click="openStock(item)">
-        <div class="stock-main">
-          <div class="stock-name">
-            {{ item.name || item.code }}
-            <span class="tag-mini">{{ marketLabel(item.market) }}</span>
+      <van-swipe-cell v-for="item in items" :key="item.code">
+        <div class="stock-item" @click="openStock(item)">
+          <div class="stock-main">
+            <div class="stock-name">
+              {{ item.name || item.code }}
+              <span class="tag-mini">{{ marketLabel(item.market) }}</span>
+            </div>
+            <div class="stock-sub">
+              <span class="mono">{{ item.code }}</span>
+              <span v-if="item.costPrice > 0">成本 {{ fmtPrice(item.costPrice) }}</span>
+              <span v-if="item.volume > 0">持仓 {{ item.volume }}</span>
+            </div>
+            <div v-if="item.costPrice > 0 && item.volume > 0" class="small" :class="changeClass(item.profitAmount)">
+              盈亏 {{ fmtSignedMoney(item.profitAmount) }} ({{ fmtPercent(item.profitPercent) }})
+            </div>
           </div>
-          <div class="stock-sub">
-            <span class="mono">{{ item.code }}</span>
-            <span v-if="item.costPrice > 0">成本 {{ fmtPrice(item.costPrice) }}</span>
-            <span v-if="item.volume > 0">持仓 {{ item.volume }}</span>
-          </div>
-          <div v-if="item.costPrice > 0 && item.volume > 0" class="small" :class="changeClass(item.profitAmount)">
-            盈亏 {{ fmtSignedMoney(item.profitAmount) }} ({{ fmtPercent(item.profitPercent) }})
+          <div class="stock-quote">
+            <div class="price-mid" :class="changeClass(item.changePercent)">{{ fmtPrice(item.price) }}</div>
+            <div class="small" :class="changeClass(item.changePercent)">{{ fmtPercent(item.changePercent) }}</div>
+            <div v-if="!item.hasQuote" class="muted" style="font-size: 10px">行情暂缺</div>
           </div>
         </div>
-        <div class="stock-quote">
-          <div class="price-mid" :class="changeClass(item.changePercent)">{{ fmtPrice(item.price) }}</div>
-          <div class="small" :class="changeClass(item.changePercent)">{{ fmtPercent(item.changePercent) }}</div>
-          <div v-if="!item.hasQuote" class="muted" style="font-size: 10px">行情暂缺</div>
-        </div>
-      </div>
+        <template #right>
+          <van-button
+            square
+            type="danger"
+            text="删除"
+            class="swipe-delete"
+            :loading="removing === item.code"
+            @click.stop="removeItem(item)"
+          />
+        </template>
+      </van-swipe-cell>
     </van-pull-refresh>
 
     <van-button class="floating-add" type="primary" icon="plus" round @click="openSearch">
@@ -170,3 +204,10 @@ onBeforeUnmount(() => {
     </van-popup>
   </div>
 </template>
+
+<style scoped>
+.swipe-delete {
+  height: 100%;
+  min-height: 64px;
+}
+</style>
