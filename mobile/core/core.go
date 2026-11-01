@@ -48,6 +48,7 @@ func Start(dataDir string, n Notifier) (string, error) {
 	if started && server != nil {
 		// 进程内重复调用：只更新 notifier（Activity 重建后通知回调对象会变）。
 		setNotifier(n)
+		scheduleMonitorRefresh()
 		return server.URL(), nil
 	}
 	if dataDir == "" {
@@ -58,13 +59,25 @@ func Start(dataDir string, n Notifier) (string, error) {
 	if loc, err := time.LoadLocation("Asia/Shanghai"); err == nil {
 		time.Local = loc
 	}
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		return "", fmt.Errorf("创建数据目录失败: %w", err)
+	rootDir, stats, err := prepareDataRoot(dataDir)
+	if err != nil {
+		return "", err
 	}
-	logger.SetLogDir(filepath.Join(dataDir, "logs"))
+	logger.SetLogDir(filepath.Join(rootDir, "logs"))
+	logger.SugaredLogger.Infof("mobile: core start dataDir=%s root=%s", dataDir, rootDir)
+	if stats.moved > 0 || stats.skipped > 0 || len(stats.errors) > 0 {
+		logger.SugaredLogger.Infof(
+			"mobile: migrate legacy data moved=%d skipped=%d errors=%d",
+			stats.moved, stats.skipped, len(stats.errors),
+		)
+		for _, msg := range stats.errors {
+			logger.SugaredLogger.Warnf("mobile: migrate legacy data: %s", msg)
+		}
+	}
+	data.SetDataDir(rootDir)
 
 	if !dbReady {
-		db.InitWithOptions(filepath.Join(dataDir, "aipanyi.db"), db.MobileOptions())
+		db.InitWithOptions(filepath.Join(rootDir, "aipanyi.db"), db.MobileOptions())
 		if err := migrateMobile(); err != nil {
 			return "", err
 		}
@@ -97,6 +110,7 @@ func Start(dataDir string, n Notifier) (string, error) {
 	go engine.run(ctx)
 
 	started = true
+	scheduleMonitorRefresh()
 	logger.SugaredLogger.Infof("mobile: started at %s (version=%s)", baseURL, buildVersion)
 	return baseURL, nil
 }
@@ -106,6 +120,7 @@ func Stop() {
 	lifecycleMu.Lock()
 	defer lifecycleMu.Unlock()
 
+	logger.SugaredLogger.Info("mobile: core stop")
 	if engineCancel != nil {
 		engineCancel()
 		engineCancel = nil
@@ -126,7 +141,7 @@ func migrateMobile() error {
 	if db.Dao == nil {
 		return errors.New("数据库未初始化")
 	}
-	return db.Dao.AutoMigrate(
+	if err := db.Dao.AutoMigrate(
 		&data.StockBasic{},
 		&data.StockInfo{},
 		&data.FollowedStock{},
@@ -137,5 +152,11 @@ func migrateMobile() error {
 		&priceAlert{},
 		&priceAlertEvent{},
 		&mobileSettings{},
-	)
+	); err != nil {
+		return err
+	}
+	if err := backfillAlertMarkets(); err != nil {
+		logger.SugaredLogger.Warnf("mobile: backfill alert markets failed: %v", err)
+	}
+	return nil
 }

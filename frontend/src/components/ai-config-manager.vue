@@ -224,12 +224,14 @@ async function fetchAiModels(aiConfig) {
     const list = await FetchAiModels(aiConfig.baseUrl, aiConfig.apiKey, aiConfig.extraHeaders || '')
     const options = (list || []).map(id => ({label: id, value: id}))
     aiConfig._modelOptions = options
-    if (!aiConfig.modelName && options.length > 0) {
-      aiConfig.modelName = options[0].value
-      onModelNameChange(aiConfig, aiConfig.modelName)
-    }
-    if (!options.length) {
-      message.warning('未从接口获取到可用模型，请检查地址和 apiKey')
+    if (options.length > 0) {
+      if (!aiConfig.modelName) {
+        aiConfig.modelName = options[0].value
+        onModelNameChange(aiConfig, aiConfig.modelName)
+      } else {
+        await fetchModelInfo(aiConfig, aiConfig.modelName)
+      }
+      message.success(`已获取 ${options.length} 个模型`)
     }
   } catch (e) {
     console.error('FetchAiModels error', e)
@@ -521,42 +523,77 @@ onMounted(() => {
             <n-input type="password" v-model:value="editingConfig.apiKey" placeholder="apiKey"
                      clearable show-password-on="click"/>
           </n-form-item>
-          <n-form-item label="模型类型" required>
-            <n-radio-group v-model:value="editingConfig.modelType">
-              <n-radio-button value="chat">文本对话</n-radio-button>
-              <n-radio-button value="embedding">向量模型</n-radio-button>
-            </n-radio-group>
-            <n-tooltip placement="top">
-              <template #trigger>
-                <n-icon color="#0e7a0d" size="18" style="margin-left: 6px; cursor: help">
-                  <HelpCircleFilledIcon/>
-                </n-icon>
-              </template>
-              <n-gradient-text :type="'warning'">
-                <div style="max-width: 380px;text-align: left">
-                  同一提供商的对话与向量接口地址可能不同，故拆分为独立条目。<br>
-                  <b>文本对话</b>：用于 Agent 对话（/v1/chat/completions）<br>
-                  <b>向量模型</b>：用于知识库向量检索（/v1/embeddings），模型名称即向量模型名
-                </div>
-              </n-gradient-text>
-            </n-tooltip>
-          </n-form-item>
           <n-form-item :label="editingConfig.modelType === 'embedding' ? '向量模型名称' : '模型名称'" required>
-            <n-select
-              v-model:value="editingConfig.modelName"
-              :options="editingConfig._modelOptions || []"
-              filterable
-              tag
-              :loading="editingConfig._loadingModels"
-              :placeholder="editingConfig.modelType === 'embedding' ? '向量模型名，如 text-embedding-3-small / BAAI/bge-m3' : '点击获取模型列表或手动输入'"
-              @click="fetchAiModels(editingConfig)"
-              @update:value="(val) => onModelNameChange(editingConfig, val)"
-            />
+            <n-space vertical style="width: 100%" :size="8">
+              <div style="display: flex; gap: 8px; width: 100%">
+                <n-select
+                  v-model:value="editingConfig.modelName"
+                  :options="editingConfig._modelOptions || []"
+                  filterable
+                  tag
+                  :loading="editingConfig._loadingModels"
+                  :placeholder="editingConfig.modelType === 'embedding' ? '向量模型名，如 text-embedding-3-small / BAAI/bge-m3' : '选择模型或手动输入'"
+                  style="flex: 1"
+                  @update:value="(val) => onModelNameChange(editingConfig, val)"
+                />
+                <n-button
+                  :loading="editingConfig._loadingModels"
+                  @click="fetchAiModels(editingConfig)"
+                >
+                  获取模型
+                </n-button>
+              </div>
+              <n-text depth="3" style="font-size: 12px">
+                选择模型后会自动填充输出上限和上下文窗口；也可在「高级参数」中手动覆盖。
+              </n-text>
+            </n-space>
           </n-form-item>
 
-          <n-form-item label="Temperature">
-            <n-input-number v-model:value="editingConfig.temperature" :step="0.1" style="width: 100%;"/>
+          <n-form-item label="深度思考">
+            <n-space align="center">
+              <n-switch v-model:value="editingConfig.thinking"/>
+              <n-tooltip placement="top">
+                <template #trigger>
+                  <n-icon color="#0e7a0d" size="20">
+                    <HelpCircleFilledIcon/>
+                  </n-icon>
+                </template>
+                <n-gradient-text :type="'warning'">
+                  <div style="max-width: 400px;text-align: left">
+                    启用深度思考模式：<br>
+                    适用于 DeepSeek-Reasoner、MiMo-V2.5-Pro 等支持推理的模型。<br>
+                    如使用普通模型请关闭此选项
+                  </div>
+                </n-gradient-text>
+              </n-tooltip>
+            </n-space>
           </n-form-item>
+
+          <n-collapse style="margin-top: 8px">
+            <n-collapse-item title="高级参数" name="advanced">
+              <n-form-item label="模型类型" required>
+                <n-radio-group v-model:value="editingConfig.modelType">
+                  <n-radio-button value="chat">文本对话</n-radio-button>
+                  <n-radio-button value="embedding">向量模型</n-radio-button>
+                </n-radio-group>
+                <n-tooltip placement="top">
+                  <template #trigger>
+                    <n-icon color="#0e7a0d" size="18" style="margin-left: 6px; cursor: help">
+                      <HelpCircleFilledIcon/>
+                    </n-icon>
+                  </template>
+                  <n-gradient-text :type="'warning'">
+                    <div style="max-width: 380px;text-align: left">
+                      同一提供商的对话与向量接口地址可能不同，故拆分为独立条目。<br>
+                      <b>文本对话</b>：用于 Agent 对话（/v1/chat/completions）<br>
+                      <b>向量模型</b>：用于知识库向量检索（/v1/embeddings），模型名称即向量模型名
+                    </div>
+                  </n-gradient-text>
+                </n-tooltip>
+              </n-form-item>
+              <n-form-item label="Temperature">
+                <n-input-number v-model:value="editingConfig.temperature" :step="0.1" style="width: 100%;"/>
+              </n-form-item>
           <n-form-item label="MaxTokens">
             <n-input-number v-model:value="editingConfig.maxTokens" style="width: 100%;"/>
           </n-form-item>
@@ -584,25 +621,6 @@ onMounted(() => {
           </n-form-item>
           <n-form-item label="Timeout(秒)">
             <n-input-number :min="60" :step="1" v-model:value="editingConfig.timeOut" style="width: 100%;"/>
-          </n-form-item>
-          <n-form-item label="深度思考">
-            <n-space align="center">
-              <n-switch v-model:value="editingConfig.thinking"/>
-              <n-tooltip placement="top">
-                <template #trigger>
-                  <n-icon color="#0e7a0d" size="20">
-                    <HelpCircleFilledIcon/>
-                  </n-icon>
-                </template>
-                <n-gradient-text :type="'warning'">
-                  <div style="max-width: 400px;text-align: left">
-                    启用深度思考模式：<br>
-                    适用于 DeepSeek-Reasoner、MiMo-V2.5-Pro 等支持推理的模型。<br>
-                    如使用普通模型请关闭此选项
-                  </div>
-                </n-gradient-text>
-              </n-tooltip>
-            </n-space>
           </n-form-item>
           <n-form-item label="视觉理解">
             <n-space align="center">
@@ -672,6 +690,8 @@ onMounted(() => {
               </div>
             </n-space>
           </n-form-item>
+            </n-collapse-item>
+          </n-collapse>
         </n-form>
         <template #footer>
           <n-space>

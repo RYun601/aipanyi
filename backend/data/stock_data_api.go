@@ -17,6 +17,7 @@ import (
 	"io/ioutil"
 	url2 "net/url"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -347,7 +348,9 @@ func (receiver StockDataApi) GetStockBaseInfo() {
 		SetResult(res).
 		Post(tushareApiUrl)
 	//logger.SugaredLogger.Infof("GetStockBaseInfo %s", string(resp.Body()))
-	ioutil.WriteFile("stock_basic.json", resp.Body(), 0666)
+	stockBasicPath := dataPath("stock_basic.json")
+	_ = os.MkdirAll(filepath.Dir(stockBasicPath), 0755)
+	ioutil.WriteFile(stockBasicPath, resp.Body(), 0666)
 	//logger.SugaredLogger.Infof("GetStockBaseInfo %+v", res)
 	if err != nil {
 		logger.SugaredLogger.Error(err.Error())

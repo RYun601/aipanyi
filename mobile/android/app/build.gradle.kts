@@ -53,4 +53,6 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     // 由 mobile/scripts/build-aar.ps1 生成
     implementation(files("libs/mobilecore.aar"))
+
+    testImplementation("junit:junit:4.13.2")
 }

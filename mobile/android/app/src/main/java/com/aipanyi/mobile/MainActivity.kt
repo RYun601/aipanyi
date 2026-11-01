@@ -36,6 +36,7 @@ class MainActivity : AppCompatActivity() {
     private var baseUrl: String? = null
     private var pendingStockCode: String? = null
     private var coreReceiver: BroadcastReceiver? = null
+    private var exiting = false
     private val handler = Handler(Looper.getMainLooper())
     private val coreTimeout = Runnable {
         if (baseUrl == null) {
@@ -52,6 +53,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        RuntimeLog.init(this)
+        RuntimeLog.info(TAG, "onCreate")
         setContentView(R.layout.activity_main)
         webView = findViewById(R.id.webview)
         progress = findViewById(R.id.progress)
@@ -120,7 +123,7 @@ class MainActivity : AppCompatActivity() {
         errorView.visibility = View.GONE
         progress.visibility = View.VISIBLE
         registerCoreReceiver()
-        startMonitorService()
+        startMonitorService(MonitorService.ACTION_UI_VISIBLE)
         handler.removeCallbacks(coreTimeout)
         handler.postDelayed(coreTimeout, 15000)
     }
@@ -143,10 +146,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onCoreReady(url: String) {
-        if (baseUrl != null) return
+        // Go core 可能因服务重启换成新端口；旧 WebView 继续 fetch 旧端口会全部失败。
+        if (!CoreUrl.shouldReload(baseUrl, url)) return
+        val firstLoad = baseUrl == null
         baseUrl = url
         handler.removeCallbacks(coreTimeout)
-        loadTarget()
+        if (firstLoad || !pendingStockCode.isNullOrBlank()) {
+            loadTarget()
+        } else {
+            reloadCurrentRoute(url)
+        }
+    }
+
+    private fun reloadCurrentRoute(url: String) {
+        val current = if (this::webView.isInitialized) webView.url else null
+        webView.loadUrl(CoreUrl.reloadUrl(url, current))
     }
 
     private fun loadTarget() {
@@ -166,13 +180,15 @@ class MainActivity : AppCompatActivity() {
         errorView.setOnClickListener { startMonitorServiceAndLoad() }
     }
 
-    private fun startMonitorService() {
+    private fun startMonitorService(action: String = MonitorService.ACTION_UI_VISIBLE) {
         try {
             ContextCompat.startForegroundService(
                 this,
-                Intent(this, MonitorService::class.java)
+                Intent(this, MonitorService::class.java).setAction(action)
             )
+            RuntimeLog.info(TAG, "start service action=$action")
         } catch (t: Throwable) {
+            RuntimeLog.error(TAG, "start monitor service failed action=$action", t)
             Log.w(TAG, "start monitor service failed", t)
         }
     }
@@ -265,6 +281,64 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        RuntimeLog.info(TAG, "onStart")
+        if (baseUrl != null) {
+            startMonitorService(MonitorService.ACTION_UI_VISIBLE)
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        RuntimeLog.info(TAG, "onStop exiting=$exiting")
+        if (exiting || isChangingConfigurations) return
+        // 不要把调度状态读回主进程：SharedPreferences 跨进程缓存可能过期。
+        // 只通知“UI 不可见”，由 :monitor 进程里的服务按自己新鲜的调度决定是否停止。
+        try {
+            startService(
+                Intent(this, MonitorService::class.java)
+                    .setAction(MonitorService.ACTION_UI_HIDDEN)
+            )
+        } catch (t: Throwable) {
+            RuntimeLog.error(TAG, "send ui hidden failed", t)
+            stopService(Intent(this, MonitorService::class.java))
+        }
+    }
+
+    fun exitApp() {
+        exiting = true
+        RuntimeLog.info(TAG, "manual exit requested")
+        try {
+            startService(
+                Intent(this, MonitorService::class.java)
+                    .setAction(MonitorService.ACTION_EXIT)
+            )
+        } catch (t: Throwable) {
+            RuntimeLog.error(TAG, "request service exit failed", t)
+            stopService(Intent(this, MonitorService::class.java))
+        }
+        finishAndRemoveTask()
+    }
+
+    fun canScheduleExactAlarms(): Boolean = MonitorScheduler.canScheduleExactAlarms(this)
+
+    fun requestExactAlarmPermission() {
+        RuntimeLog.info(TAG, "request exact alarm permission")
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        try {
+            startActivity(
+                Intent(
+                    Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                    Uri.parse("package:$packageName")
+                )
+            )
+        } catch (t: Throwable) {
+            RuntimeLog.error(TAG, "open exact alarm settings failed", t)
+            openAppDetails()
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -285,6 +359,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        RuntimeLog.info(TAG, "onDestroy")
         handler.removeCallbacks(coreTimeout)
         coreReceiver?.let {
             try {

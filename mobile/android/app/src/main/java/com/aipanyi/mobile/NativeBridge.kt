@@ -41,5 +41,18 @@ class NativeBridge(private val activity: MainActivity) {
     }
 
     @JavascriptInterface
+    fun exitApp() {
+        activity.runOnUiThread { activity.exitApp() }
+    }
+
+    @JavascriptInterface
+    fun canScheduleExactAlarms(): Boolean = MonitorScheduler.canScheduleExactAlarms(activity)
+
+    @JavascriptInterface
+    fun requestExactAlarmPermission() {
+        activity.runOnUiThread { activity.requestExactAlarmPermission() }
+    }
+
+    @JavascriptInterface
     fun appVersion(): String = BuildConfig.VERSION_NAME
 }

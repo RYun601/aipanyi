@@ -230,6 +230,8 @@ type HotMoneySeatFile struct {
 
 const hotMoneySeatsFile = "data/hot_money_seats.json"
 
+func hotMoneySeatsPath() string { return dataPath(hotMoneySeatsFile) }
+
 // defaultHotMoneySeatsRemoteURL 默认远程名录源（上游仓库 dev 分支）
 var defaultHotMoneySeatsRemoteURL = appinfo.RawFileURL("data/hot_money_seats.json")
 
@@ -354,15 +356,15 @@ func loadHotMoneySeatIndex() []hotMoneyIndexEntry {
 // readHotMoneySeatFile 读取外置名录文件；文件不存在时用内置种子生成一份并返回。
 // ok=false 表示读取/解析均失败（调用方回退空索引，匹配退化为基础分类）。
 func readHotMoneySeatFile() (HotMoneySeatFile, bool) {
-	raw, err := os.ReadFile(hotMoneySeatsFile)
+	raw, err := os.ReadFile(hotMoneySeatsPath())
 	if err != nil {
 		if !os.IsNotExist(err) {
 			logger.SugaredLogger.Warnf("读取游资名录失败: %v", err)
 			return HotMoneySeatFile{}, false
 		}
 		// 文件不存在：直接落盘内置名录原始内容（保留 meta 扩展字段），方便用户后续自行维护
-		_ = os.MkdirAll(filepath.Dir(hotMoneySeatsFile), 0755)
-		if werr := os.WriteFile(hotMoneySeatsFile, builtinHotMoneySeatsJSON, 0644); werr != nil {
+		_ = os.MkdirAll(filepath.Dir(hotMoneySeatsPath()), 0755)
+		if werr := os.WriteFile(hotMoneySeatsPath(), builtinHotMoneySeatsJSON, 0644); werr != nil {
 			logger.SugaredLogger.Warnf("写入游资名录种子文件失败: %v", werr)
 		}
 		return builtinHotMoneySeatsSeed(), true
@@ -415,8 +417,8 @@ func SaveHotMoneySeats(f *HotMoneySeatFile) error {
 // ResetHotMoneySeats 恢复内置种子名录（覆盖外置文件并热更新内存索引）
 func ResetHotMoneySeats() error {
 	// 直接写内置原始内容（保留 meta 扩展字段）
-	_ = os.MkdirAll(filepath.Dir(hotMoneySeatsFile), 0755)
-	if err := os.WriteFile(hotMoneySeatsFile, builtinHotMoneySeatsJSON, 0644); err != nil {
+	_ = os.MkdirAll(filepath.Dir(hotMoneySeatsPath()), 0755)
+	if err := os.WriteFile(hotMoneySeatsPath(), builtinHotMoneySeatsJSON, 0644); err != nil {
 		return fmt.Errorf("写游资名录文件失败: %w", err)
 	}
 	seed := builtinHotMoneySeatsSeed()
@@ -433,8 +435,8 @@ func writeHotMoneySeatFile(f *HotMoneySeatFile) error {
 	if err != nil {
 		return fmt.Errorf("序列化游资名录失败: %w", err)
 	}
-	_ = os.MkdirAll(filepath.Dir(hotMoneySeatsFile), 0755)
-	if err := os.WriteFile(hotMoneySeatsFile, b, 0644); err != nil {
+	_ = os.MkdirAll(filepath.Dir(hotMoneySeatsPath()), 0755)
+	if err := os.WriteFile(hotMoneySeatsPath(), b, 0644); err != nil {
 		return fmt.Errorf("写游资名录文件失败: %w", err)
 	}
 	return nil

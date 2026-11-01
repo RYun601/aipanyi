@@ -116,6 +116,8 @@ var defaultKeyDepartments = []string{
 // keyDepartmentsFile 重点部门外置文件（用户自定义，可编辑）
 const keyDepartmentsFile = "data/key_departments.json"
 
+func keyDepartmentsPath() string { return dataPath(keyDepartmentsFile) }
+
 // keyDepartmentFile 外置文件结构
 type keyDepartmentFile struct {
 	Departments []string `json:"departments"`
@@ -288,12 +290,12 @@ func (p PolicyNewsApi) SaveKeyDepartments(departments []string) string {
 	if len(cleaned) == 0 {
 		cleaned = append(cleaned, defaultKeyDepartments...)
 	}
-	if err := os.MkdirAll(filepath.Dir(keyDepartmentsFile), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(keyDepartmentsPath()), 0755); err != nil {
 		logger.SugaredLogger.Errorf("保存重点部门失败(创建目录):%v", err)
 		return "保存失败：" + err.Error()
 	}
 	b, _ := json.MarshalIndent(keyDepartmentFile{Departments: cleaned}, "", "    ")
-	if err := os.WriteFile(keyDepartmentsFile, b, 0644); err != nil {
+	if err := os.WriteFile(keyDepartmentsPath(), b, 0644); err != nil {
 		logger.SugaredLogger.Errorf("保存重点部门失败:%v", err)
 		return "保存失败：" + err.Error()
 	}
@@ -308,7 +310,7 @@ func (p PolicyNewsApi) SaveKeyDepartments(departments []string) string {
 // loadKeyDepartments 读取重点部门：优先外置 data/key_departments.json，
 // 文件不存在/为空/解析失败时回退默认列表（返回副本避免调用方污染默认值）。
 func loadKeyDepartments() []string {
-	if raw, err := os.ReadFile(keyDepartmentsFile); err == nil {
+	if raw, err := os.ReadFile(keyDepartmentsPath()); err == nil {
 		var f keyDepartmentFile
 		if json.Unmarshal(raw, &f) == nil && len(f.Departments) > 0 {
 			return f.Departments

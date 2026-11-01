@@ -54,10 +54,36 @@ public abstract class mobilecore.Mobilecore {
 public interface mobilecore.Notifier {
   void notify(String title, String body, String payload);
   void updateMonitorStatus(int active);
+  void updateMonitorSchedule(long startMs, long endMs, long nextStartMs);
 }
 ```
 
 Kotlin 侧 `AppNotifier` / `MonitorService` 已按此实现；`MainActivity` 不再直接启动 Go 核心。
+
+## 运行数据与日志
+
+- 数据根目录：`filesDir/aipanyi/`
+- SQLite：`filesDir/aipanyi/aipanyi.db`
+- Go 日志：`filesDir/aipanyi/logs/info.log`、`error.log`
+- Kotlin 生命周期日志：`filesDir/aipanyi/logs/runtime.log`（512 KB 滚动，保留 3 个文件）
+
+交易日连手机分析：
+
+```powershell
+adb shell run-as com.aipanyi.mobile cat files/aipanyi/logs/runtime.log
+adb shell run-as com.aipanyi.mobile cat files/aipanyi/logs/info.log
+```
+
+`run-as` 仅对 debug 包有效；release 包请用文件管理器进入应用私有目录导出。
+
+## 后台调度
+
+- Go 核心按启用提醒的市场计算当前/下一个交易窗口，通过 `UpdateMonitorSchedule` 下发给 Kotlin。
+- A 股 09:15–15:00、港股 09:00–16:10、美股 04:00–20:00（纽约时间，含盘前盘后）。
+- 重叠/首尾相接的窗口合并为一个连续窗口。
+- 没有启用提醒时不安排后台启动。
+- 设置页「退出应用」停止本次运行，下一个未来窗口仍会自动启动。
+- Android 12+ 若未授权 `SCHEDULE_EXACT_ALARM`，会降级为不精确闹钟；设置页可跳转授权。
 
 ## 真机验收（2026-10-31，Honor 50 / MagicOS 8.0.0.221）
 

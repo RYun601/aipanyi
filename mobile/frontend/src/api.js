@@ -76,6 +76,10 @@ export const api = {
   saveAIConfig: (cfg) => call('SaveAIConfig', cfg),
   deleteAIConfig: (id) => call('DeleteAIConfig', Number(id)),
   testAIConfig: (cfg) => call('TestAIConfig', cfg),
+  fetchAiModels: (baseUrl, apiKey, extraHeaders = '') =>
+    call('FetchAiModels', baseUrl, apiKey, extraHeaders),
+  fetchAiModelInfo: (baseUrl, apiKey, modelName, extraHeaders = '') =>
+    call('FetchAiModelInfo', baseUrl, apiKey, modelName, extraHeaders),
 
   // 提示词
   listPrompts: () => call('ListPrompts'),

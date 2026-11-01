@@ -180,6 +180,7 @@ func removeStock(code string) (string, error) {
 	// 取消关注后同步关闭该股票的提醒，避免继续为不在自选里的股票发通知。
 	_ = db.Dao.Model(&priceAlert{}).Where("stock_code = ?", norm).Update("enabled", false).Error
 	updateMonitorStatus(lenAlertsEnabled())
+	scheduleMonitorRefresh()
 	return msg, nil
 }
 

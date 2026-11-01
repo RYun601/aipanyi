@@ -42,6 +42,18 @@ export const native = {
     const b = nativeBridge()
     if (b) safe(() => b.openNotificationSettings(), null)
   },
+  exitApp() {
+    const b = nativeBridge()
+    if (b) safe(() => b.exitApp(), null)
+  },
+  canScheduleExactAlarms() {
+    const b = nativeBridge()
+    return b ? !!safe(() => b.canScheduleExactAlarms(), false) : false
+  },
+  requestExactAlarmPermission() {
+    const b = nativeBridge()
+    if (b) safe(() => b.requestExactAlarmPermission(), null)
+  },
   version() {
     const b = nativeBridge()
     return b ? String(safe(() => b.appVersion(), '') || '') : ''
