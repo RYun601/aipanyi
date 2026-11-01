@@ -1,15 +1,6 @@
 package main
 
 import (
-	"aipanyi/backend/agent"
-	"aipanyi/backend/agent/tools"
-	"aipanyi/backend/appinfo"
-	"aipanyi/backend/data"
-	"aipanyi/backend/db"
-	"aipanyi/backend/logger"
-	"aipanyi/backend/machineid"
-	"aipanyi/backend/marketcal"
-	"aipanyi/backend/models"
 	"archive/zip"
 	"bytes"
 	"context"
@@ -17,6 +8,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"aipanyi/backend/agent"
+	"aipanyi/backend/appinfo"
+	"aipanyi/backend/agent/tools"
+	"aipanyi/backend/data"
+	"aipanyi/backend/db"
+	"aipanyi/backend/logger"
+	"aipanyi/backend/machineid"
+	"aipanyi/backend/marketcal"
+	"aipanyi/backend/models"
 	"io"
 	"os"
 	"path/filepath"
@@ -32,7 +32,6 @@ import (
 	"github.com/stretchr/testify/assert/yaml"
 	"golang.org/x/exp/slices"
 
-	"aipanyi/backend/events"
 	"github.com/coocood/freecache"
 	"github.com/duke-git/lancet/v2/convertor"
 	"github.com/duke-git/lancet/v2/mathutil"
@@ -40,6 +39,7 @@ import (
 	"github.com/duke-git/lancet/v2/strutil"
 	"github.com/robfig/cron/v3"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"aipanyi/backend/events"
 )
 
 // App struct
@@ -4306,9 +4306,9 @@ func (a *App) ImportSkillPackage() string {
 		return "未选择文件"
 	}
 
+
 	return importSkillPackageFromZip(zipPath)
 }
-
 // importSkillPackageFromZip 执行技能包 ZIP 的解压与校验（无对话框依赖，两种模式共用）。
 func importSkillPackageFromZip(zipPath string) string {
 	// 读取 zip 文件
@@ -4422,6 +4422,7 @@ func importSkillPackageFromZip(zipPath string) string {
 	logger.SugaredLogger.Infof("技能包导入成功: %s -> %s", skillDirName, targetDir)
 	return "技能 '" + skillDirName + "' 导入成功"
 }
+
 
 // ListFilesystemSkills
 //

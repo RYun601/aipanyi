@@ -141,7 +141,7 @@ func migrateMobile() error {
 	if db.Dao == nil {
 		return errors.New("数据库未初始化")
 	}
-	return db.Dao.AutoMigrate(
+	if err := db.Dao.AutoMigrate(
 		&data.StockBasic{},
 		&data.StockInfo{},
 		&data.FollowedStock{},
@@ -152,5 +152,11 @@ func migrateMobile() error {
 		&priceAlert{},
 		&priceAlertEvent{},
 		&mobileSettings{},
-	)
+	); err != nil {
+		return err
+	}
+	if err := backfillAlertMarkets(); err != nil {
+		logger.SugaredLogger.Warnf("mobile: backfill alert markets failed: %v", err)
+	}
+	return nil
 }

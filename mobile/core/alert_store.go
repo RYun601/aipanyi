@@ -70,6 +70,28 @@ func lenAlertsEnabled() int {
 	return int(count)
 }
 
+// backfillAlertMarkets 给早期版本缺失 market 字段的提醒规则补齐市场。
+// AutoMigrate 只会加列，不会回填历史行；不补的话 HK/US 老提醒会按 A 股窗口调度。
+func backfillAlertMarkets() error {
+	if db.Dao == nil {
+		return errors.New("数据库未初始化")
+	}
+	var rows []priceAlert
+	if err := db.Dao.Where("market = '' OR market IS NULL").Find(&rows).Error; err != nil {
+		return err
+	}
+	for _, row := range rows {
+		market := marketOf(row.StockCode)
+		if market == "" {
+			continue
+		}
+		if err := db.Dao.Model(&priceAlert{}).Where("id = ?", row.ID).Update("market", market).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func saveAlert(in alertDTO) (int64, error) {
 	norm := normalizeCode(in.Code)
 	if norm == "" {

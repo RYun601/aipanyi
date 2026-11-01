@@ -10,6 +10,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+	// 让 marketcal 自己保证 IANA 数据可用：Android ROM 的 zoneinfo 可能不完整，
+	// 而依赖 mobile/core 的空白导入存在初始化顺序不确定性。
+	_ "time/tzdata"
 
 	"github.com/coocood/freecache"
 

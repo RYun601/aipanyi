@@ -282,17 +282,15 @@ class MainActivity : AppCompatActivity() {
         super.onStop()
         RuntimeLog.info(TAG, "onStop exiting=$exiting")
         if (exiting || isChangingConfigurations) return
-        if (MonitorScheduler.isInWindow(this)) {
-            try {
-                startService(
-                    Intent(this, MonitorService::class.java)
-                        .setAction(MonitorService.ACTION_UI_HIDDEN)
-                )
-            } catch (t: Throwable) {
-                RuntimeLog.error(TAG, "send ui hidden failed", t)
-            }
-        } else {
-            RuntimeLog.info(TAG, "ui hidden outside window, stop service")
+        // 不要把调度状态读回主进程：SharedPreferences 跨进程缓存可能过期。
+        // 只通知“UI 不可见”，由 :monitor 进程里的服务按自己新鲜的调度决定是否停止。
+        try {
+            startService(
+                Intent(this, MonitorService::class.java)
+                    .setAction(MonitorService.ACTION_UI_HIDDEN)
+            )
+        } catch (t: Throwable) {
+            RuntimeLog.error(TAG, "send ui hidden failed", t)
             stopService(Intent(this, MonitorService::class.java))
         }
     }

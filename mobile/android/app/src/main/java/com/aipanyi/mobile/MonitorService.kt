@@ -193,11 +193,13 @@ class MonitorService : Service() {
         alarmTimeout?.let { handler.removeCallbacks(it) }
         alarmTimeout = null
         RuntimeLog.info(TAG, "stop service reason=$reason")
-        try {
-            mobilecore.Mobilecore.stop()
-        } catch (t: Throwable) {
-            RuntimeLog.error(TAG, "stop mobile core failed", t)
-        }
+        Thread {
+            try {
+                mobilecore.Mobilecore.stop()
+            } catch (t: Throwable) {
+                RuntimeLog.error(TAG, "stop mobile core failed", t)
+            }
+        }.start()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -224,11 +226,13 @@ class MonitorService : Service() {
         stopRunnable?.let { handler.removeCallbacks(it) }
         alarmTimeout?.let { handler.removeCallbacks(it) }
         handler.removeCallbacksAndMessages(null)
-        try {
-            mobilecore.Mobilecore.stop()
-        } catch (t: Throwable) {
-            RuntimeLog.error(TAG, "onDestroy stop core failed", t)
-        }
+        Thread {
+            try {
+                mobilecore.Mobilecore.stop()
+            } catch (t: Throwable) {
+                RuntimeLog.error(TAG, "onDestroy stop core failed", t)
+            }
+        }.start()
         instance = null
         isRunning = false
         MonitorScheduler.scheduleNext(applicationContext, "service_destroy")
