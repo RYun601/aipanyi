@@ -8,6 +8,7 @@ const loading = ref(true)
 const settings = ref(null)
 const aiConfigs = ref([])
 const prompts = ref([])
+const builtinPrompts = ref([])
 const version = ref({})
 const summary = ref({})
 const testing = ref(false)
@@ -16,6 +17,8 @@ const showAiEditor = ref(false)
 const showPromptEditor = ref(false)
 const showAiPicker = ref(false)
 const showPromptPicker = ref(false)
+const showPromptText = ref(false)
+const promptTextView = ref(null)
 const showAdvancedAi = ref(false)
 const showModelPicker = ref(false)
 const modelKeyword = ref('')
@@ -35,8 +38,8 @@ const aiForm = reactive({
   apiKey: '',
   modelName: '',
   modelType: 'chat',
-  maxTokens: 4096,
-  contextWindow: 0,
+  maxTokens: '',
+  contextWindow: '',
   temperature: 0.7,
   timeOut: 300,
   httpProxy: '',
@@ -59,31 +62,40 @@ const aiOptions = computed(() =>
   aiConfigs.value.map((c) => ({ text: `${c.name} · ${c.modelName}`, value: c.id }))
 )
 const promptOptions = computed(() => [
-  { text: '内置提示词', value: 0 },
-  ...prompts.value.map((p) => ({ text: p.name, value: p.id }))
+  { text: '自动（按持仓选择内置）', value: 0 },
+  ...builtinPrompts.value.map((p) => ({ text: p.name, value: Number(p.id) })),
+  ...prompts.value.map((p) => ({ text: p.name, value: Number(p.id) }))
+])
+const allPromptRows = computed(() => [
+  ...builtinPrompts.value.map((p) => ({ ...p, builtin: true })),
+  ...prompts.value.map((p) => ({ ...p, builtin: false }))
 ])
 const selectedAiName = computed(() => {
   const c = aiConfigs.value.find((x) => x.id === settings.value?.defaultAiConfigId)
   return c ? c.name : '未选择'
 })
 const selectedPromptName = computed(() => {
-  const p = prompts.value.find((x) => x.id === settings.value?.defaultPromptId)
-  return p ? p.name : '内置提示词'
+  const id = Number(settings.value?.defaultPromptId)
+  if (!id) return '自动（按持仓选择内置）'
+  const p = [...builtinPrompts.value, ...prompts.value].find((x) => Number(x.id) === id)
+  return p ? p.name : '自动（按持仓选择内置）'
 })
 
 async function load() {
   loading.value = true
   try {
-    const [s, a, p, v, sum] = await Promise.all([
+    const [s, a, p, v, sum, ap] = await Promise.all([
       api.getSettings(),
       api.listAIConfigs(),
       api.listPrompts(),
       api.getVersionInfo(),
-      api.getDataSummary()
+      api.getDataSummary(),
+      api.listAnalysisPrompts().catch(() => [])
     ])
     settings.value = s
     aiConfigs.value = a || []
     prompts.value = p || []
+    builtinPrompts.value = (ap || []).filter((x) => Number(x.id) < 0)
     version.value = v || {}
     summary.value = sum || {}
   } catch (e) {
@@ -133,8 +145,8 @@ function resetAiForm(c) {
     apiKey: c?.apiKey || '',
     modelName: c?.modelName || '',
     modelType: c?.modelType || 'chat',
-    maxTokens: c?.maxTokens || 4096,
-    contextWindow: c?.contextWindow || 0,
+    maxTokens: c?.maxTokens || '',
+    contextWindow: c?.contextWindow || '',
     temperature: c?.temperature ?? 0.7,
     timeOut: c?.timeOut || 300,
     httpProxy: c?.httpProxy || '',
@@ -282,6 +294,11 @@ function editPrompt(p) {
   showPromptEditor.value = true
 }
 
+function viewPrompt(p) {
+  promptTextView.value = p
+  showPromptText.value = true
+}
+
 async function savePrompt() {
   if (!promptForm.name.trim() || !promptForm.content.trim()) {
     showToast('请填写名称和内容')
@@ -322,7 +339,7 @@ function onAiPick({ selectedOptions }) {
 
 function onPromptPick({ selectedOptions }) {
   if (settings.value && selectedOptions?.[0]) {
-    settings.value.defaultPromptId = selectedOptions[0].value
+    settings.value.defaultPromptId = Number(selectedOptions[0].value) || 0
     saveSettings()
   }
   showPromptPicker.value = false
@@ -409,18 +426,29 @@ onMounted(load)
           <div style="font-size: 17px; font-weight: 650">系统提示词</div>
           <van-button size="small" plain type="primary" @click="addPrompt">新增</van-button>
         </div>
-        <div v-if="!prompts.length" class="muted" style="padding: 12px 0">
-          还没有自定义提示词；分析时会使用内置提示词。
+        <div class="muted" style="margin: 6px 0 2px">
+          内置提示词只读；自定义模板可新增、编辑或删除。
         </div>
-        <div v-for="p in prompts" :key="p.id" style="padding: 10px 0; border-bottom: 1px solid var(--ap-line)">
+        <div v-if="!allPromptRows.length" class="muted" style="padding: 12px 0">
+          还没有提示词。
+        </div>
+        <div
+          v-for="p in allPromptRows"
+          :key="p.id"
+          style="padding: 10px 0; border-bottom: 1px solid var(--ap-line)"
+        >
           <div class="row">
-            <div>
+            <div style="min-width: 0">
               <div style="font-weight: 600">{{ p.name }}</div>
-              <div class="muted">{{ p.type || 'stock' }}</div>
+              <div class="muted">{{ p.builtin ? '内置提示词 · 只读' : p.type || 'stock' }}</div>
             </div>
-            <div class="row" style="gap: 10px">
-              <van-icon name="edit" size="18" @click="editPrompt(p)" />
-              <van-icon name="delete-o" size="18" color="#e5484d" @click="removePrompt(p)" />
+            <div class="row" style="gap: 10px; align-items: center">
+              <van-tag v-if="p.builtin" type="primary" plain size="mini">内置</van-tag>
+              <van-icon name="eye-o" size="18" @click="viewPrompt(p)" />
+              <template v-if="!p.builtin">
+                <van-icon name="edit" size="18" @click="editPrompt(p)" />
+                <van-icon name="delete-o" size="18" color="#e5484d" @click="removePrompt(p)" />
+              </template>
             </div>
           </div>
         </div>
@@ -591,8 +619,20 @@ onMounted(load)
         />
         <van-cell-group v-if="showAdvancedAi" inset>
           <van-field v-model="aiForm.modelType" label="类型" placeholder="chat / embedding" />
-          <van-field v-model="aiForm.maxTokens" type="number" label="MaxTokens" input-align="right" />
-          <van-field v-model="aiForm.contextWindow" type="number" label="上下文窗口" input-align="right" />
+          <van-field
+            v-model="aiForm.maxTokens"
+            type="number"
+            label="MaxTokens"
+            input-align="right"
+            placeholder="留空自动（推荐）"
+          />
+          <van-field
+            v-model="aiForm.contextWindow"
+            type="number"
+            label="上下文窗口"
+            input-align="right"
+            placeholder="留空自动"
+          />
           <van-field v-model="aiForm.temperature" type="number" label="Temperature" input-align="right" />
           <van-field v-model="aiForm.timeOut" type="number" label="超时(秒)" input-align="right" />
           <van-field v-model="aiForm.httpProxy" label="HTTP 代理" placeholder="http://127.0.0.1:7890" />
@@ -671,5 +711,26 @@ onMounted(load)
         @cancel="showPromptPicker = false"
       />
     </van-popup>
+
+    <van-popup v-model:show="showPromptText" position="bottom" round closeable style="max-height: 80vh">
+      <div class="sheet">
+        <div class="sheet-title">{{ promptTextView?.name || '提示词全文' }}</div>
+        <div class="muted" style="margin-bottom: 10px">
+          {{ promptTextView?.builtin ? '内置提示词（只读）' : '自定义提示词' }}
+        </div>
+        <div class="prompt-full-text">{{ promptTextView?.content || '' }}</div>
+        <van-button block plain round style="margin-top: 14px" @click="showPromptText = false">关闭</van-button>
+      </div>
+    </van-popup>
   </div>
 </template>
+
+<style scoped>
+.prompt-full-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ap-text-2, #4b5563);
+  font-size: 13px;
+  line-height: 1.65;
+}
+</style>

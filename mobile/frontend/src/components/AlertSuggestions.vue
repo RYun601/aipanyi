@@ -98,7 +98,16 @@ async function confirm() {
           input-align="right"
           style="margin-top: 8px"
         />
-        <van-field v-if="item.valid" v-model="item.note" label="备注" input-align="right" />
+        <div v-if="item.valid" class="suggestion-note">
+          <div class="muted suggestion-note-label">备注</div>
+          <van-field
+            v-model="item.note"
+            type="textarea"
+            rows="2"
+            autosize
+            placeholder="可编辑备注"
+          />
+        </div>
       </div>
 
       <div class="row" style="margin-top: 12px">
@@ -108,3 +117,13 @@ async function confirm() {
     </div>
   </van-popup>
 </template>
+
+<style scoped>
+.suggestion-note {
+  margin-top: 8px;
+}
+.suggestion-note-label {
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+</style>

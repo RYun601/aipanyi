@@ -27,8 +27,17 @@ const showAlertEdit = ref(false)
 const editingAlert = ref(null)
 const showSuggestions = ref(false)
 const suggestions = ref([])
+const showAnalysisSheet = ref(false)
+const analysisPrompts = ref([])
+const selectedPromptId = ref(0)
+const analysisQuestion = ref('')
+const loadingAnalysisPrompts = ref(false)
+const showPromptPicker = ref(false)
+const showPromptPreview = ref(false)
+const analysisElsewhere = ref(false)
 let offAnalysis = null
 let offSuggestions = null
+let statusTimer = null
 
 const item = computed(() => detail.value?.item || {})
 const alerts = computed(() => detail.value?.alerts || [])
@@ -38,6 +47,17 @@ const canExtract = computed(() => !running.value && !!displayAnalysis.value.trim
 const currentCode = computed(() => (item.value.code || props.code || '').toLowerCase())
 const selectedPositionCodes = computed(() =>
   positionOptions.value.filter((p) => p.selected).map((p) => p.code)
+)
+const selectedPromptName = computed(() => {
+  const selected = analysisPrompts.value.find((p) => Number(p.id) === Number(selectedPromptId.value))
+  return selected?.name || '默认（跟随设置）'
+})
+const promptColumns = computed(() =>
+  analysisPrompts.value.map((p) => ({ text: p.name, value: String(p.id) }))
+)
+const promptPickerValue = computed(() => [String(selectedPromptId.value)])
+const previewPrompts = computed(() =>
+  analysisPrompts.value.filter((p) => Number(p.id) !== 0 && String(p.content || '').trim() !== '')
 )
 const allSelected = computed({
   get: () => positionOptions.value.length > 0 && positionOptions.value.every((p) => p.selected),
@@ -62,8 +82,48 @@ async function load() {
   }
 }
 
+function stopStatusPolling() {
+  if (statusTimer) {
+    window.clearInterval(statusTimer)
+    statusTimer = null
+  }
+}
+
+function startStatusPolling() {
+  if (statusTimer) return
+  statusTimer = window.setInterval(() => {
+    syncAnalysisStatus()
+  }, 5000)
+}
+
+// 页面在分析途中被切走再回来时，本地 running 状态已经丢失；这里以服务端状态为准。
+async function syncAnalysisStatus() {
+  try {
+    const status = await api.getAnalysisStatus()
+    const isRunning = !!status?.running
+    const activeCode = String(status?.code || '').toLowerCase()
+    if (isRunning && activeCode === currentCode.value) {
+      running.value = true
+      analysisElsewhere.value = false
+    } else if (isRunning) {
+      running.value = false
+      analysisElsewhere.value = true
+    } else {
+      const wasRunning = running.value
+      running.value = false
+      analysisElsewhere.value = false
+      if (wasRunning) await load()
+    }
+    if (isRunning) startStatusPolling()
+    else stopStatusPolling()
+  } catch {
+    // 状态查询失败不应该影响详情页本身。
+  }
+}
+
 function onAnalysis(payload) {
   if (!payload || payload.code !== props.code) return
+  analysisElsewhere.value = false
   if (payload.delta) {
     draft.value += payload.delta
     running.value = true
@@ -77,12 +137,82 @@ function onAnalysis(payload) {
   }
 }
 
-async function startAnalysis() {
+async function openAnalysisSheet() {
   if (running.value) return
+  if (analysisElsewhere.value) {
+    showToast('另一只股票正在分析，请稍候')
+    return
+  }
   if (withPosition.value && selectedPositionCodes.value.length === 0) {
     showToast('请选择至少一只持仓，或关闭持仓开关')
     return
   }
+  analysisQuestion.value = ''
+  closePromptOverlays()
+  showAnalysisSheet.value = true
+  await loadAnalysisPrompts()
+}
+
+async function loadAnalysisPrompts() {
+  if (analysisPrompts.value.length) return
+  loadingAnalysisPrompts.value = true
+  try {
+    const list = await api.listAnalysisPrompts()
+    analysisPrompts.value = Array.isArray(list) ? list : []
+    try {
+      const settings = await api.getSettings()
+      const defaultId = Number(settings?.defaultPromptId) || 0
+      selectedPromptId.value = analysisPrompts.value.some((p) => Number(p.id) === defaultId) ? defaultId : 0
+    } catch {
+      // 读取默认提示词失败不影响选择模板，退回到“跟随设置”。
+      selectedPromptId.value = 0
+    }
+  } catch (e) {
+    showToast(e?.message || '读取提示词失败')
+    analysisPrompts.value = [
+      { id: 0, name: '默认（跟随设置）', content: '', type: 'default' },
+      { id: -1, name: '内置：中性分析', content: '', type: 'builtin' },
+      { id: -2, name: '内置：持仓分析', content: '', type: 'builtin' }
+    ]
+    selectedPromptId.value = 0
+  } finally {
+    loadingAnalysisPrompts.value = false
+  }
+}
+
+function openPromptPicker() {
+  if (loadingAnalysisPrompts.value) return
+  showPromptPreview.value = false
+  showPromptPicker.value = true
+}
+
+function onPromptConfirm(payload) {
+  const value = payload?.selectedValues?.[0] ?? payload?.selectedOptions?.[0]?.value
+  selectedPromptId.value = Number(value) || 0
+  showPromptPicker.value = false
+}
+
+function openPromptPreview() {
+  showPromptPicker.value = false
+  showPromptPreview.value = true
+}
+
+function closePromptOverlays() {
+  showPromptPicker.value = false
+  showPromptPreview.value = false
+}
+
+async function confirmStartAnalysis() {
+  if (running.value) return
+  if (analysisElsewhere.value) {
+    showToast('另一只股票正在分析，请稍候')
+    return
+  }
+  if (withPosition.value && selectedPositionCodes.value.length === 0) {
+    showToast('请选择至少一只持仓，或关闭持仓开关')
+    return
+  }
+  showAnalysisSheet.value = false
   running.value = true
   draft.value = ''
   reasoning.value = ''
@@ -90,7 +220,9 @@ async function startAnalysis() {
     await api.startAnalysis(
       props.code,
       withPosition.value,
-      withPosition.value ? selectedPositionCodes.value : []
+      withPosition.value ? selectedPositionCodes.value : [],
+      selectedPromptId.value,
+      analysisQuestion.value
     )
     showToast('AI 分析已开始')
   } catch (e) {
@@ -216,6 +348,7 @@ async function extractAlerts() {
 
 onMounted(() => {
   load()
+  syncAnalysisStatus()
   offAnalysis = onWS('mobileAnalysis', onAnalysis)
   offSuggestions = onWS('mobileAlertSuggestions', (payload) => {
     if (!payload || payload.code !== props.code) return
@@ -229,6 +362,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  stopStatusPolling()
   offAnalysis && offAnalysis()
   offSuggestions && offSuggestions()
 })
@@ -236,12 +370,16 @@ onBeforeUnmount(() => {
 watch(
   () => props.code,
   () => {
+    stopStatusPolling()
     draft.value = ''
     reasoning.value = ''
+    running.value = false
+    analysisElsewhere.value = false
     withPosition.value = false
     positionOptions.value = []
     loadingPositions.value = false
     load()
+    syncAnalysisStatus()
   }
 )
 </script>
@@ -292,13 +430,15 @@ watch(
               <div style="font-size: 17px; font-weight: 650">AI 分析</div>
               <div class="muted">
                 <span v-if="running">正在分析，请稍候…</span>
+                <span v-else-if="analysisElsewhere">另一只股票正在分析，请稍候…</span>
                 <span v-else-if="savedAnalysis">上次 {{ savedAnalysis.createdAt }} · {{ savedAnalysis.modelName || 'AI' }}</span>
-                <span v-else>可选择是否带入持仓信息</span>
+                <span v-else>点「开始分析」可选提示词和本次问题</span>
               </div>
             </div>
             <div class="row" style="gap: 6px">
               <van-button v-if="running" size="small" plain type="danger" @click="cancelAnalysis">取消</van-button>
-              <van-button v-else size="small" type="primary" @click="startAnalysis">开始分析</van-button>
+              <van-button v-else-if="analysisElsewhere" size="small" disabled>分析进行中</van-button>
+              <van-button v-else size="small" type="primary" @click="openAnalysisSheet">开始分析</van-button>
             </div>
           </div>
 
@@ -434,6 +574,130 @@ watch(
       </div>
     </van-popup>
 
+    <van-popup
+      v-model:show="showAnalysisSheet"
+      position="bottom"
+      round
+      closeable
+      :style="{ maxHeight: '88%' }"
+      @closed="closePromptOverlays"
+    >
+      <div class="sheet analysis-sheet">
+        <div class="sheet-title">开始分析</div>
+        <div class="muted analysis-sheet-hint">
+          选择本次使用的系统提示词，并可补充本次问题。只影响这一次，不会修改设置里的默认提示词。
+        </div>
+
+        <div v-if="withPosition" class="analysis-context">
+          已带入 {{ selectedPositionCodes.length }} 只持仓
+          <span v-if="selectedPositionCodes.includes(currentCode)">（含当前股票）</span>
+        </div>
+        <div v-else class="analysis-context muted">本次不带入持仓信息</div>
+
+        <div class="analysis-section-title">系统提示词</div>
+        <div v-if="loadingAnalysisPrompts" class="muted" style="padding: 8px 0">正在读取提示词…</div>
+        <template v-else>
+          <van-cell-group inset>
+            <van-cell
+              title="本次使用"
+              :value="selectedPromptName"
+              is-link
+              clickable
+              @click="openPromptPicker"
+            />
+          </van-cell-group>
+          <van-button
+            v-if="previewPrompts.length"
+            class="prompt-preview-btn"
+            size="small"
+            type="primary"
+            plain
+            block
+            icon="eye-o"
+            @click="openPromptPreview"
+          >
+            查看提示词全文
+          </van-button>
+        </template>
+
+        <div class="analysis-section-title">本次问题</div>
+        <van-field
+          v-model="analysisQuestion"
+          type="textarea"
+          rows="3"
+          autosize
+          maxlength="2000"
+          show-word-limit
+          placeholder="可补充本次关注点，例如：结合我的持仓给出止损位。留空则使用默认问题。"
+        />
+
+        <div class="analysis-sheet-actions">
+          <van-button block plain @click="showAnalysisSheet = false">取消</van-button>
+          <van-button
+            block
+            type="primary"
+            :loading="running"
+            :disabled="loadingAnalysisPrompts"
+            @click="confirmStartAnalysis"
+          >
+            开始分析
+          </van-button>
+        </div>
+      </div>
+    </van-popup>
+
+    <van-popup
+      v-model:show="showPromptPicker"
+      position="bottom"
+      round
+      :z-index="3000"
+    >
+      <van-picker
+        title="选择系统提示词"
+        :columns="promptColumns"
+        :model-value="promptPickerValue"
+        @confirm="onPromptConfirm"
+        @cancel="showPromptPicker = false"
+      />
+    </van-popup>
+
+    <van-popup
+      v-model:show="showPromptPreview"
+      position="bottom"
+      round
+      closeable
+      :style="{ height: '86%' }"
+      :z-index="3100"
+    >
+      <div class="sheet prompt-preview-sheet">
+        <div class="sheet-title">提示词全文</div>
+        <div class="muted prompt-preview-hint">
+          这里只查看全文，返回后可在「本次使用」下拉框中选择。内置提示词和已保存模板都会列在下面。
+        </div>
+        <div v-for="p in previewPrompts" :key="p.id" class="prompt-preview-card">
+          <div class="prompt-preview-head">
+            <div class="prompt-preview-name">{{ p.name }}</div>
+            <van-tag
+              v-if="Number(p.id) === Number(selectedPromptId)"
+              type="primary"
+              plain
+              size="mini"
+            >
+              本次选中
+            </van-tag>
+            <van-tag v-else type="default" plain size="mini">
+              {{ p.type === 'builtin' ? '内置' : '已保存' }}
+            </van-tag>
+          </div>
+          <div class="prompt-full-content">{{ p.content }}</div>
+        </div>
+        <div class="muted prompt-preview-note">
+          「默认（跟随设置）」会使用设置页当前选中的系统提示词，不在这里重复展示正文。
+        </div>
+        <van-button block plain round @click="showPromptPreview = false">返回</van-button>
+      </div>
+    </van-popup>
+
     <AlertEdit
       v-model:show="showAlertEdit"
       :stock="{ code: item.code || code, name: item.name || '' }"
@@ -502,5 +766,65 @@ watch(
   font-size: 12px;
   margin-top: 2px;
   line-height: 1.45;
+}
+.analysis-sheet {
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}
+.analysis-sheet-hint {
+  margin-bottom: 10px;
+  line-height: 1.55;
+}
+.analysis-context {
+  margin: 6px 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.analysis-section-title {
+  margin: 14px 0 6px;
+  font-size: 14px;
+  font-weight: 650;
+}
+.prompt-preview-btn {
+  margin-top: 8px;
+}
+.prompt-preview-sheet {
+  padding-bottom: calc(18px + env(safe-area-inset-bottom));
+}
+.prompt-preview-hint {
+  margin-bottom: 12px;
+  line-height: 1.55;
+}
+.prompt-preview-card {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--ap-line);
+}
+.prompt-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.prompt-preview-name {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+.prompt-full-content {
+  color: var(--ap-text-2, #4b5563);
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.prompt-preview-note {
+  margin: 12px 0;
+  line-height: 1.55;
+}
+.analysis-sheet-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 16px;
 }
 </style>

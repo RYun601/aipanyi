@@ -41,11 +41,10 @@ func chatStream(ctx context.Context, cfg data.AIConfig, systemPrompt, userPrompt
 	if timeout <= 0 || timeout > 180 {
 		timeout = 180
 	}
+	// 不在这里写死上限：分析类请求按模型上下文和输出能力解析。否则思考模型
+	// 会把额度全部耗在 reasoning 上，正文变成空。
 	if maxTokens <= 0 {
-		maxTokens = 4096
-	}
-	if maxTokens > 4096 {
-		maxTokens = 4096
+		maxTokens = resolveOutputTokenBudget(cfg, systemPrompt, userPrompt)
 	}
 
 	client := resty.New().SetTimeout(time.Duration(timeout) * time.Second)
@@ -57,32 +56,37 @@ func chatStream(ctx context.Context, cfg data.AIConfig, systemPrompt, userPrompt
 		"model":       cfg.ModelName,
 		"stream":      true,
 		"temperature": cfg.Temperature,
-		"max_tokens":  maxTokens,
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": userPrompt},
 		},
 	}
-	req := client.R().
-		SetContext(ctx).
-		SetDoNotParseResponse(true).
-		SetHeader("Authorization", "Bearer "+cfg.ApiKey).
-		SetHeader("Content-Type", "application/json").
-		SetHeader("Accept", "text/event-stream").
-		SetBody(body)
-	if extra := buildExtraHeaders(cfg); len(extra) > 0 {
-		req = req.SetHeaders(extra)
-	}
-	resp, err := req.Post(base + path)
-	if err != nil {
-		logger.SugaredLogger.Errorf("chatStream: post %s failed: %v", base+path, err)
-		return "", fmt.Errorf("请求 AI 服务失败: %w", err)
-	}
-	logger.SugaredLogger.Infof("chatStream: post %s status=%d", base+path, resp.StatusCode())
-	defer func() { _ = resp.RawBody().Close() }()
+	var resp *resty.Response
+	for attempt := 0; ; attempt++ {
+		body["max_tokens"] = maxTokens
+		req := client.R().
+			SetContext(ctx).
+			SetDoNotParseResponse(true).
+			SetHeader("Authorization", "Bearer "+cfg.ApiKey).
+			SetHeader("Content-Type", "application/json").
+			SetHeader("Accept", "text/event-stream").
+			SetBody(body)
+		if extra := buildExtraHeaders(cfg); len(extra) > 0 {
+			req = req.SetHeaders(extra)
+		}
+		var err error
+		resp, err = req.Post(base + path)
+		if err != nil {
+			logger.SugaredLogger.Errorf("chatStream: post %s failed: %v", base+path, err)
+			return "", fmt.Errorf("请求 AI 服务失败: %w", err)
+		}
+		logger.SugaredLogger.Infof("chatStream: post %s status=%d max_tokens=%d", base+path, resp.StatusCode(), maxTokens)
+		if resp.StatusCode() == 200 {
+			break
+		}
 
-	if resp.StatusCode() != 200 {
 		raw, _ := io.ReadAll(resp.RawBody())
+		_ = resp.RawBody().Close()
 		msg := strings.TrimSpace(string(raw))
 		var parsed chatCompletionResponse
 		if json.Unmarshal(raw, &parsed) == nil && parsed.Error != nil && parsed.Error.Message != "" {
@@ -91,10 +95,19 @@ func chatStream(ctx context.Context, cfg data.AIConfig, systemPrompt, userPrompt
 		if len([]rune(msg)) > 300 {
 			msg = string([]rune(msg)[:300])
 		}
+		if attempt < 3 && shouldRetryMaxTokens(resp.StatusCode(), msg) {
+			if next := nextMaxTokensAfterLimit(maxTokens); next > 0 {
+				logger.SugaredLogger.Warnf("chatStream: max_tokens=%d rejected, retry with %d: %s", maxTokens, next, msg)
+				maxTokens = next
+				continue
+			}
+		}
 		return "", fmt.Errorf("AI 服务返回 %d: %s", resp.StatusCode(), msg)
 	}
+	defer func() { _ = resp.RawBody().Close() }()
 
 	var content, reasoning strings.Builder
+	finishReason := ""
 	scanner := bufio.NewScanner(resp.RawBody())
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
@@ -118,6 +131,9 @@ func chatStream(ctx context.Context, cfg data.AIConfig, systemPrompt, userPrompt
 			return content.String(), errors.New(chunk.Error.Message)
 		}
 		for _, choice := range chunk.Choices {
+			if choice.FinishReason != "" {
+				finishReason = choice.FinishReason
+			}
 			if choice.Delta.Content != "" {
 				content.WriteString(choice.Delta.Content)
 				if onDelta != nil {
@@ -138,8 +154,15 @@ func chatStream(ctx context.Context, cfg data.AIConfig, systemPrompt, userPrompt
 		}
 		return content.String(), fmt.Errorf("读取 AI 流失败: %w", err)
 	}
-	if strings.TrimSpace(content.String()) == "" {
-		return "", errors.New("AI 未返回文本内容")
+	contentText := strings.TrimSpace(content.String())
+	reasoningText := reasoning.String()
+	logger.SugaredLogger.Infof("chatStream done: model=%s max_tokens=%d content_len=%d reasoning_len=%d finish=%s",
+		cfg.ModelName, maxTokens, len([]rune(contentText)), len([]rune(reasoningText)), finishReason)
+	if contentText == "" {
+		if strings.TrimSpace(reasoningText) != "" {
+			return "", fmt.Errorf("AI 只返回了思考过程（%d 字，finish_reason=%s），输出额度可能被思考耗尽；请在设置中提高 MaxTokens", len([]rune(reasoningText)), finishReason)
+		}
+		return "", fmt.Errorf("AI 未返回文本内容（finish_reason=%s）", finishReason)
 	}
 	return content.String(), nil
 }

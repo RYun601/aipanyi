@@ -65,9 +65,17 @@ export const api = {
   getStockDetail: (code) => call('GetStockDetail', code),
 
   // AI 分析
-  startAnalysis: (code, withPosition = false, positionCodes = []) =>
-    call('StartAnalysis', code, !!withPosition, Array.isArray(positionCodes) ? positionCodes : []),
+  startAnalysis: (code, withPosition = false, positionCodes = [], promptId = 0, question = '') =>
+    call(
+      'StartAnalysis',
+      code,
+      !!withPosition,
+      Array.isArray(positionCodes) ? positionCodes : [],
+      Number(promptId) || 0,
+      String(question || '')
+    ),
   cancelAnalysis: () => call('CancelAnalysis'),
+  getAnalysisStatus: () => call('GetAnalysisStatus'),
   getAnalysis: (code) => call('GetAnalysis', code),
   extractAlerts: (code) => call('ExtractAlerts', code),
 
@@ -83,6 +91,7 @@ export const api = {
 
   // 提示词
   listPrompts: () => call('ListPrompts'),
+  listAnalysisPrompts: () => call('ListAnalysisPrompts'),
   savePrompt: (p) => call('SavePrompt', p),
   deletePrompt: (id) => call('DeletePrompt', Number(id)),
 

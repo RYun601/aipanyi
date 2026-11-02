@@ -45,6 +45,29 @@ func TestFetchAiModelsAndInfo(t *testing.T) {
 	}
 }
 
+func TestFetchAiModelInfoUsesContextWindowField(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":                "deepseek-flash",
+			"context_window":    1048576,
+			"max_output_tokens": 393216,
+		})
+	}))
+	defer srv.Close()
+
+	info := FetchAiModelInfo(srv.URL+"/v1", "test-key", "deepseek-flash", "")
+	if info == nil {
+		t.Fatal("FetchAiModelInfo() = nil")
+	}
+	if info.ContextWindow != 1048576 {
+		t.Fatalf("ContextWindow = %d, want 1048576", info.ContextWindow)
+	}
+	if info.MaxTokens != 393216 {
+		t.Fatalf("MaxTokens = %d, want 393216", info.MaxTokens)
+	}
+}
+
 func TestFetchAiModelInfoFallsBackToBuiltin(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	defer srv.Close()

@@ -14,6 +14,12 @@ import (
 	"aipanyi/backend/logger"
 )
 
+const (
+	analysisPromptDefault  int64 = 0
+	analysisPromptNeutral  int64 = -1
+	analysisPromptPosition int64 = -2
+)
+
 const defaultAnalysisSystemPromptNeutral = `你是一位严谨的 A 股分析师，擅长基于行情和 K 线给出可执行的交易策略。
 要求：
 1. 只基于给定数据分析，不编造行情、财务或消息数据。
@@ -29,6 +35,28 @@ const defaultAnalysisSystemPromptPosition = `你是一位严谨的 A 股分析�
 3. 以当前分析股票为主，结合组合权重/集中度给出持有/加仓/减仓/止损建议。
 4. 涉及价格时给出明确数字或区间。
 5. 用中文 Markdown 输出，结构清晰。`
+
+// builtinAnalysisPrompts 返回弹窗中的固定选项。ID 0 表示跟随设置，
+// 负数 ID 预留给内置提示词，避免与数据库模板主键冲突。
+func builtinAnalysisPrompts() []promptDTO {
+	return []promptDTO{
+		{ID: analysisPromptDefault, Name: "默认（跟随设置）", Type: "default"},
+		{ID: analysisPromptNeutral, Name: "内置：中性分析", Content: defaultAnalysisSystemPromptNeutral, Type: "builtin"},
+		{ID: analysisPromptPosition, Name: "内置：持仓分析", Content: defaultAnalysisSystemPromptPosition, Type: "builtin"},
+	}
+}
+
+func listAnalysisPrompts() []promptDTO {
+	out := builtinAnalysisPrompts()
+	res := data.NewPromptTemplateApi().GetPromptTemplates("", "")
+	if res == nil {
+		return out
+	}
+	for _, p := range *res {
+		out = append(out, promptDTO{ID: int64(p.ID), Name: p.Name, Content: p.Content, Type: p.Type})
+	}
+	return out
+}
 
 func getAnalysis(code string) *analysisDTO {
 	norm := normalizeCode(code)
@@ -54,7 +82,7 @@ func getAnalysis(code string) *analysisDTO {
 	}
 }
 
-func (a *mobileApp) startAnalysis(code string, withPosition bool, positionCodes []string) (string, error) {
+func (a *mobileApp) startAnalysis(code string, withPosition bool, positionCodes []string, promptID int64, question string) (string, error) {
 	norm := normalizeCode(code)
 	if norm == "" {
 		return "", errors.New("股票代码为空")
@@ -86,13 +114,14 @@ func (a *mobileApp) startAnalysis(code string, withPosition bool, positionCodes 
 	runID := uuid.NewString()
 	a.analysisCancel = cancel
 	a.analysisRunID = runID
+	a.analysisCode = norm
 	a.analysisMu.Unlock()
 
 	name := f.Name
 	if strings.TrimSpace(name) == "" {
 		name = stockDisplayName(norm)
 	}
-	go a.runAnalysis(ctx, runID, norm, name, aiID, settings, withPosition, selected)
+	go a.runAnalysis(ctx, runID, norm, name, aiID, settings, withPosition, selected, promptID, question)
 	return runID, nil
 }
 
@@ -109,12 +138,13 @@ func (a *mobileApp) finishAnalysis(runID string) {
 	a.analysisMu.Lock()
 	if a.analysisRunID == runID {
 		a.analysisRunID = ""
+		a.analysisCode = ""
 		a.analysisCancel = nil
 	}
 	a.analysisMu.Unlock()
 }
 
-func (a *mobileApp) runAnalysis(ctx context.Context, runID, code, name string, aiConfigID int64, settings mobileSettings, withPosition bool, positionCodes []string) {
+func (a *mobileApp) runAnalysis(ctx context.Context, runID, code, name string, aiConfigID int64, settings mobileSettings, withPosition bool, positionCodes []string, promptID int64, question string) {
 	logger.SugaredLogger.Infof("runAnalysis entered: run=%s code=%s name=%s ai=%d withPosition=%v positions=%d", runID, code, name, aiConfigID, withPosition, len(positionCodes))
 	defer a.finishAnalysis(runID)
 	defer func() {
@@ -154,13 +184,15 @@ func (a *mobileApp) runAnalysis(ctx context.Context, runID, code, name string, a
 	logger.SugaredLogger.Infof("mobile analysis: portfolio positions=%d currentIncluded=%v", portfolioCount, currentIncluded)
 
 	repl := analysisTemplateReplacer(name, code, price, cost, volume, currentIncluded)
-	systemPrompt := buildAnalysisSystemPrompt(settings, repl, withPosition)
+	settingConfig := data.GetSettingConfig()
+	systemPrompt := buildAnalysisSystemPrompt(settings, repl, withPosition, promptID)
 	dataBlock := buildAnalysisDataBlock(name, code, price, cost, volume, currentIncluded)
-	userPrompt := buildAnalysisUserPrompt(repl, dataBlock, kline, withPosition, portfolioBlock)
+	userPrompt := buildAnalysisUserPrompt(repl, dataBlock, kline, withPosition, portfolioBlock, question, settingConfig.QuestionTemplate)
 	chatID := uuid.NewString()
 
 	logger.SugaredLogger.Infof("mobile analysis: calling AI, prompt len=%d", len(userPrompt))
-	final, err := chatStream(ctx, cfg, systemPrompt, userPrompt, cfg.MaxTokens,
+	// 0 表示由 chatStream 按模型上下文/输出上限解析本次 max_tokens。
+	final, err := chatStream(ctx, cfg, systemPrompt, userPrompt, 0,
 		func(delta string) {
 			emitMobile("mobileAnalysis", map[string]any{
 				"runId": runID, "code": code, "delta": delta,
@@ -207,10 +239,9 @@ func (a *mobileApp) runAnalysis(ctx context.Context, runID, code, name string, a
 	}
 	suggestions, err := extractAlertsWithConfig(code, name, final, price, cfg)
 	if err != nil {
+		// 分析本体已经成功，自动提取只是附加能力；失败只记日志，不再用
+		// “AI 未返回文本内容”之类的提示打断用户。手动提取仍会返回错误。
 		logger.SugaredLogger.Warnf("mobile: extract alerts failed: %v", err)
-		emitMobile("mobileAlertSuggestions", map[string]any{
-			"code": code, "name": name, "error": err.Error(),
-		})
 		return
 	}
 	emitMobile("mobileAlertSuggestions", map[string]any{
@@ -251,7 +282,25 @@ func analysisTemplateReplacer(name, code string, price, cost float64, volume int
 	)
 }
 
-func buildAnalysisSystemPrompt(settings mobileSettings, repl *strings.Replacer, withPosition bool) string {
+func buildAnalysisSystemPrompt(settings mobileSettings, repl *strings.Replacer, withPosition bool, promptID int64) string {
+	switch promptID {
+	case analysisPromptNeutral:
+		return defaultAnalysisSystemPromptNeutral
+	case analysisPromptPosition:
+		return defaultAnalysisSystemPromptPosition
+	}
+	if promptID > 0 {
+		if p := data.NewPromptTemplateApi().GetPromptTemplateByID(int(promptID)); strings.TrimSpace(p) != "" {
+			return repl.Replace(p)
+		}
+	}
+	// 设置里的默认提示词也可以直接选内置项（-1/-2），此时不查数据库模板。
+	switch settings.DefaultPromptID {
+	case analysisPromptNeutral:
+		return defaultAnalysisSystemPromptNeutral
+	case analysisPromptPosition:
+		return defaultAnalysisSystemPromptPosition
+	}
 	if settings.DefaultPromptID > 0 {
 		if p := data.NewPromptTemplateApi().GetPromptTemplateByID(int(settings.DefaultPromptID)); strings.TrimSpace(p) != "" {
 			return repl.Replace(p)
@@ -266,8 +315,11 @@ func buildAnalysisSystemPrompt(settings mobileSettings, repl *strings.Replacer, 
 	return defaultAnalysisSystemPromptNeutral
 }
 
-func buildAnalysisUserPrompt(repl *strings.Replacer, dataBlock, kline string, withPosition bool, portfolioBlock string) string {
-	custom := strings.TrimSpace(data.GetSettingConfig().QuestionTemplate)
+func buildAnalysisUserPrompt(repl *strings.Replacer, dataBlock, kline string, withPosition bool, portfolioBlock, questionOverride, settingQuestion string) string {
+	custom := strings.TrimSpace(questionOverride)
+	if custom == "" {
+		custom = strings.TrimSpace(settingQuestion)
+	}
 	question := custom
 	if question == "" {
 		if withPosition {
