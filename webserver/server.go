@@ -97,7 +97,7 @@ func New(app any, assets fs.FS, opts Options) (*Server, error) {
 
 	lg := opts.Logger
 	if lg == nil {
-		lg = log.New(os.Stdout, "[aipanyi-web] ", log.LstdFlags)
+		lg = log.New(os.Stdout, "[aipanyi-mobile] ", log.LstdFlags)
 	}
 
 	s := &Server{

@@ -1,11 +1,11 @@
-//go:build web
+//go:build mobileassets
 
 package events
 
 import "context"
 
-// Emit Web 模式（-tags web 构建）：广播给所有 WebSocket 订阅者。
-// ctx 仅为保持与 Wails 签名一致，Web 模式下不使用。
+// Emit Android 端（-tags mobileassets 构建）：广播给本地 webserver 的
+// WebSocket 订阅者。ctx 仅为保持与 Wails 签名一致，移动端不使用。
 func Emit(_ context.Context, eventName string, optionalData ...any) {
 	var data any
 	if len(optionalData) > 0 {

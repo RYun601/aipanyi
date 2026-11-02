@@ -1,4 +1,4 @@
-//go:build web
+//go:build mobileassets
 
 package webserver
 
@@ -40,7 +40,7 @@ func TestWebSocketEventBridge(t *testing.T) {
 		t.Fatal("WS 建连后未注册为事件订阅者")
 	}
 
-	// 经事件桥推送（Web 模式下等价于原 runtime.EventsEmit）
+	// 经事件桥推送（Android 端本地 webserver 使用）
 	events.Emit(context.Background(), "test-event", map[string]any{"msg": "hello"})
 
 	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))

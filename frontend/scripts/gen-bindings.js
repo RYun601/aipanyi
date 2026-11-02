@@ -1,16 +1,13 @@
 /**
- * gen-bindings.js — 把 wails 原生生成的 App.js 改写为双模式桥接版
+ * gen-bindings.js — 把 wails 原生生成的 App.js 改写为 Wails 桥接版
  *
  * 背景：
  *   `wails build` 每次都会重新生成 frontend/wailsjs/go/main/App.js，内容形如
  *       export function Foo(arg1) {
  *         return window['go']['main']['App']['Foo'](arg1);
  *       }
- *   这种写法只在 Wails 桌面容器里有效；Web 模式（-tags web）下 window['go'] 不存在，
- *   全部绑定调用会直接抛错。
- *
- *   而本项目要求同一份前端代码同时跑在桌面与浏览器两种形态下，因此必须让每个绑定
- *   都走 bridge.js 的 call()，由它按运行环境分发。
+ *   这种写法直接依赖生成文件；统一走 bridge.js 的 call() 后，绑定调用与事件入口
+ *   都集中在一个手写文件里，便于维护。
  *
  * 做法：
  *   本脚本在 `npm run build` 中最先执行（wails build 会调用 frontend:build，
@@ -20,7 +17,7 @@
  *
  * 安全性：
  *   改写完成后会断言"导出函数数 == 走 call() 的函数数"。一旦 wails 改变了生成格式
- *   导致正则失配，这里会直接报错退出，而不是安静地产出一个 Web 模式不可用的包。
+ *   导致正则失配，这里会直接报错退出，而不是安静地产出一个绑定损坏的包。
  */
 
 const fs = require('fs');
@@ -30,13 +27,10 @@ const target = path.join(__dirname, '..', 'wailsjs', 'go', 'main', 'App.js');
 
 const HEADER = [
   '// @ts-check',
-  '// AI盘译 前端绑定层（双模式）—— 由 scripts/gen-bindings.js 自动生成，请勿手工编辑。',
+  '// AI盘译 前端绑定层（Wails）—— 由 scripts/gen-bindings.js 自动生成，请勿手工编辑。',
   '//',
-  '// wails 原生生成的结果是 window[\'go\'] 直连，只在桌面容器里有效；这里统一改写为',
-  '// 走 bridge.js 的 call()，由它按运行环境分发：',
-  '//   - 桌面模式（Wails）：转发到 window[\'go\'][\'main\'][\'App\'][method]',
-  '//   - Web 模式（浏览器）：POST /api/call 反射派发',
-  '// 业务代码 import 方式不变。',
+  '// wails 原生生成的结果是 window[\'go\'] 直连；这里统一改写为走 bridge.js 的 call()，',
+  '// 由它转发到 window[\'go\'][\'main\'][\'App\'][method]。业务代码 import 方式不变。',
   '',
   "import { call } from '../../bridge.js';",
   '',

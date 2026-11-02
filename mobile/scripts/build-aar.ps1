@@ -93,7 +93,7 @@ $aar = Join-Path $outDir "mobilecore.aar"
 & $gomobile bind `
     "-target=$Target" `
     -androidapi 26 `
-    -tags "web mobileassets" `
+    -tags "mobileassets" `
     -ldflags "-s -w -X aipanyi/mobile/core.buildVersion=$Version" `
     -o "$aar" `
     aipanyi/mobile/core

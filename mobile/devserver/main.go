@@ -4,7 +4,7 @@
 //
 // 用法：
 //
-//	go run -tags "web mobileassets devserver" ./mobile/devserver
+//	go run -tags "mobileassets devserver" ./mobile/devserver
 //
 // 然后打开终端输出的 http://127.0.0.1:<port>/ 。
 // 数据默认写到 tmp/mobile-dev-data（已在 .gitignore 中忽略）。

@@ -1224,7 +1224,7 @@ func (a *App) AddCronTask(follow data.FollowedStock) func() {
 		go events.Emit(a.ctx, "warnMsg", "开始自动分析"+follow.Name+"_"+follow.StockCode)
 		ai := data.NewDeepSeekOpenAi(a.ctx, follow.AiConfigId)
 		thinking := data.GetSettingConfig().GetAIConfigThinking(follow.AiConfigId)
-		msgs := ai.NewChatStream(follow.Name, follow.StockCode, "", nil, a.AiTools, thinking)
+		msgs := ai.NewChatStream(follow.Name, follow.StockCode, "", nil, a.AiTools, thinking, nil)
 		var res strings.Builder
 
 		chatId := ""
@@ -1967,7 +1967,7 @@ func (a *App) GetFeishuBotStatus() string {
 	return "stopped"
 }
 
-func (a *App) NewChatStream(stock, stockCode, question string, aiConfigId int, sysPromptId *int, enableTools bool, think bool) {
+func (a *App) NewChatStream(stock, stockCode, question string, aiConfigId int, sysPromptId *int, enableTools bool, think bool, withPosition bool, positionCodes []string) error {
 	defer func() {
 		if err := recover(); err != nil {
 			logger.SugaredLogger.Errorf("NewChatStream panic: %v", err)
@@ -1978,16 +1978,36 @@ func (a *App) NewChatStream(stock, stockCode, question string, aiConfigId int, s
 			events.Emit(a.ctx, "newChatStream", "DONE")
 		}
 	}()
-	var msgs <-chan map[string]any
-	if enableTools {
-		msgs = data.NewDeepSeekOpenAi(a.ctx, aiConfigId).NewChatStream(stock, stockCode, question, sysPromptId, a.AiTools, think)
+
+	var position *data.PositionContext
+	if withPosition {
+		position = data.BuildPositionContext(stockCode, 0, positionCodes)
+		if position.Count == 0 {
+			return fmt.Errorf("已开启「带入持仓信息」，但没有可用的持仓股票：请先为自选股设置成本价和持仓数量，或关闭该开关")
+		}
 	} else {
-		msgs = data.NewDeepSeekOpenAi(a.ctx, aiConfigId).NewChatStream(stock, stockCode, question, sysPromptId, []data.Tool{}, think)
+		position = &data.PositionContext{Enabled: false}
 	}
+
+	tools := a.AiTools
+	if !enableTools {
+		tools = []data.Tool{}
+	} else {
+		// 股票页的持仓上下文只允许来自用户本次勾选。屏蔽能直接读取全部自选成本/持仓
+		// 和交易记录持仓的工具，避免关闭开关或仅勾选部分股票时被模型绕过。
+		tools = data.ExcludeTools(tools,
+			"GetFollowedStocks",
+			"GetTradingRecordList",
+			"GetTradingRecordStatistics",
+		)
+	}
+
+	msgs := data.NewDeepSeekOpenAi(a.ctx, aiConfigId).NewChatStream(stock, stockCode, question, sysPromptId, tools, think, position)
 	for msg := range msgs {
 		events.Emit(a.ctx, "newChatStream", msg)
 	}
 	events.Emit(a.ctx, "newChatStream", "DONE")
+	return nil
 }
 
 func (a *App) SaveAIResponseResult(stockCode, stockName, result, chatId, question string, aiConfigId int) {

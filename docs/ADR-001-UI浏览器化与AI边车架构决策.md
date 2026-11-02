@@ -2,10 +2,14 @@
 
 | 项 | 内容 |
 | --- | --- |
-| 状态 | **已接受** |
+| 状态 | **已废弃（2026-10-31 由 ADR-002 取代）** |
 | 日期 | 2026-09-25 |
 | 影响范围 | 启动流程、UI 承载方式、前后端通信层、AI 能力扩展方式、分发形态 |
 | 相关代码 | `main.go`、`app_common.go`、`app_windows/darwin/linux.go`、`backend/agent/*`、`frontend/*`、`ai-assistant-web/*` |
+
+> **后续决策**：桌面端已恢复为仅 Wails 窗口，`-tags web` 网页版模式已删除；
+> `webserver` 包仅保留给 Android 端本地界面使用。详见
+> [ADR-002：移除桌面网页版模式](ADR-002-移除桌面网页版模式.md)。本文件保留为历史决策记录。
 
 ---
 

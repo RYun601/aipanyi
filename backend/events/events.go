@@ -1,11 +1,11 @@
-// Package events 提供向前端推送事件的统一入口，兼容两种运行模式：
+// Package events 提供向前端推送事件的统一入口，兼容桌面端与 Android 端：
 //
-//   - 桌面模式（默认构建）：转发给 Wails runtime.EventsEmit；
-//   - Web 模式（-tags web 构建）：广播给 webserver 注册的所有 WebSocket 订阅者。
+//   - 桌面端（默认构建）：转发给 Wails runtime.EventsEmit；
+//   - Android 端（-tags mobileassets 构建）：广播给本地 webserver 注册的所有 WebSocket 订阅者。
 //
 // 设计要点：
 //   - Emit 签名与 wails runtime.EventsEmit 完全一致，既有调用点可机械替换；
-//   - 订阅者由 webserver 在 Web 模式下注册；桌面模式下无订阅者，行为与原来完全相同；
+//   - 桌面端无订阅者；Android 端由本地 webserver 注册订阅者；
 //   - 所有导出函数对 nil / 空事件名安全，调用方无需防御；
 //   - 本包不 import 任何业务包，避免循环依赖（backend/data、backend/agent 均可引用）。
 package events
@@ -23,7 +23,7 @@ var (
 	subs  = map[Subscriber]struct{}{}
 )
 
-// Subscribe 注册订阅者。Web 模式下由 webserver 在 WS 建连时调用。
+// Subscribe 注册订阅者。Android 端由本地 webserver 在 WS 建连时调用。
 func Subscribe(s Subscriber) {
 	if s == nil {
 		return

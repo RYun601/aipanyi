@@ -42,11 +42,11 @@ npm install
 npm run build
 
 cd ../..
-go run -tags "web mobileassets devserver" ./mobile/devserver
+go run -tags "mobileassets devserver" ./mobile/devserver
 # 打开输出的 http://127.0.0.1:<port>/
 ```
 
-数据写入 `tmp/mobile-dev-data`。也可以用 `-tags web` 跑占位页（只验证 Go 接口）。
+数据写入 `tmp/mobile-dev-data`。去掉 `mobileassets` 会使用占位页（只验证 Go 接口）。
 
 ## 测试
 
@@ -55,9 +55,9 @@ go run -tags "web mobileassets devserver" ./mobile/devserver
 go test ./mobile/alerts
 
 # 编译
-go build -tags web ./mobile/...
-go build -tags "web mobileassets" ./mobile/...
-GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -tags web ./mobile/...
+go build ./mobile/...
+go build -tags "mobileassets" ./mobile/...
+GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -tags "mobileassets" ./mobile/...
 ```
 
 > Windows Defender 偶尔会把 `mobile/core` 的测试二进制误判为病毒（它链接了

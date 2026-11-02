@@ -133,6 +133,23 @@ func FilterTempDisabledTools(tools []Tool) []Tool {
 	})
 }
 
+// ExcludeTools 按工具名排除工具，返回新切片，不修改入参。
+// 用于股票页 AI 分析：持仓上下文只允许来自用户本次显式勾选的股票，
+// 避免模型通过工具绕过“带入持仓信息”开关读取全部自选/交易记录。
+func ExcludeTools(tools []Tool, names ...string) []Tool {
+	if len(tools) == 0 || len(names) == 0 {
+		return tools
+	}
+	excluded := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		excluded[name] = struct{}{}
+	}
+	return lo.Filter(tools, func(t Tool, _ int) bool {
+		_, skip := excluded[t.Function.Name]
+		return !skip
+	})
+}
+
 // IsToolKeyConfigured 检查单个工具所需的 API Key 是否已配置（用于 Eino Agent 模式）
 func IsToolKeyConfigured(toolName string) bool {
 	requiredKey, exists := toolRequiredKey[toolName]
