@@ -40,7 +40,12 @@ Release: <https://github.com/RYun601/aipanyi/releases/tag/v1.0.2-pre>
 
 ## SHA256
 
-CI 产物和 Android APK 上传后补到本 Release 的 `SHA256SUMS.txt`。
+```text
+15b17aa5384c281c0514c1100e96bd6008a8c14c46dbef30dc1e8b3fe2dbe89c  aipanyi-android-0.1.1-debug.apk
+07b75b949a7bbfa8ac99bf0ad1ba61c3a91fffe8140c2f16ebb5004ef30e187d  aipanyi-darwin-universal.zip
+4ef178f95df8a04d8af0494bd8a9022993ecfcc5741ab020373097b1bff10f2a  aipanyi-windows-amd64.exe
+35c750f6c01d6ea5098a65b98e488fbe540fffffea4f860662196743cb1d161b  aipanyi-windows-arm64.exe
+```
 
 ---
 
