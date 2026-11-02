@@ -1,3 +1,49 @@
+# 2026.11 / v1.0.2-pre
+
+Release: <https://github.com/RYun601/aipanyi/releases/tag/v1.0.2-pre>
+
+## ✨ 新增
+
+- **开始分析可选提示词**：点击「开始分析」先打开底部弹窗，可选择默认、内置中性、内置持仓或已保存模板，并可填写本次问题；只影响这次分析，不改设置。
+- **提示词全文查看**：分析弹窗内新增「查看提示词全文」，可看两个内置提示词和所有已保存模板的完整正文；设置页也直接列出两个内置提示词，带「内置」标签和查看入口。
+- **AI 建议备注完整显示**：价格提醒建议的备注改为多行文本框，长备注不再被单行输入框截断。
+
+## 🐛 修复
+
+- 部分股票分析、自动提取提醒报「AI 未返回文本内容」：根因是流式分析被 4096、提取被 600 的输出上限截断，思考模型把额度全耗在 reasoning 上。现在按模型上下文和输出能力解析预算，正文可以正常返回。
+- 分析进行中切到设置等页面再回到同一只股票，按钮错误显示「开始分析」并提示已有分析在进行：现在会同步服务端运行状态，按钮保持「取消」；其他股票在分析时会显示占用提示并禁用启动。
+- 设置页看不到内置提示词：系统提示词卡片和默认提示词下拉都已补上内置项。
+
+## ⚡ 优化
+
+- `deepseek-flash` 内置模型信息补全为 1M 上下文 / 384K 输出，并支持解析 `/models/{id}` 的 `context_window`。
+- 未显式配置 MaxTokens 时按 128K 目标并受模型上限、上下文窗口约束；旧的显式配置继续尊重。遇到 400 `max_tokens` 超限会自动降级重试。
+- AI 连接测试不再使用 16 token；新建 AI 配置的 MaxTokens 默认留空自动。
+- 自动提取提醒失败只写日志，不再打断分析结果；手动提取仍返回具体错误。
+
+## ⚠️ 注意事项
+
+- Android 包仍为 **debug 签名、arm64-v8a 侧载包**，安装包不含任何 AI key；请在 App 设置里填写自己的 AI 配置，key 只保存在手机本地 SQLite。
+- 手机端版本号更新为 **0.1.1**，可直接覆盖安装旧版，原有自选、持仓、设置和分析数据保留。
+- 桌面端为常规 Windows x64 / Windows ARM64 / macOS universal 包。
+- 真机验证环境：Honor NTH-AN00 / Android 14；真实 DeepSeek 接口已验证赛力斯 + 3 只持仓分析、自动提取提醒、分析中切页返回状态和长备注显示。
+
+## 下载
+
+| 平台 | 文件 |
+| --- | --- |
+| Windows x64 | `aipanyi-windows-amd64.exe` |
+| Windows ARM64 | `aipanyi-windows-arm64.exe` |
+| macOS（Intel + Apple Silicon） | `aipanyi-darwin-universal.zip` |
+| Android arm64（debug 侧载） | `aipanyi-android-0.1.1-debug.apk` |
+| 校验值 | `SHA256SUMS.txt` |
+
+## SHA256
+
+CI 产物和 Android APK 上传后补到本 Release 的 `SHA256SUMS.txt`。
+
+---
+
 # 2026.11 / v1.0.1-pre
 
 Release: <https://github.com/RYun601/aipanyi/releases/tag/v1.0.1-pre>

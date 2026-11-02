@@ -73,7 +73,9 @@ func extractAlertsWithConfig(code, name, analysis string, currentPrice float64, 
 		"3. price 必须是数字，A 股保留两位小数。\n" +
 		"4. 没有明确价格时输出 {\"alerts\":[]}。"
 
-	content, err := chatOnce(cfg, extractSystemPrompt, userPrompt, 600)
+	// 0 表示按模型预算解析，不能用 600 这类小额度：思考模型的 reasoning
+	// 会先耗尽额度，导致正文 JSON 为空。
+	content, err := chatOnce(cfg, extractSystemPrompt, userPrompt, 0)
 	if err != nil {
 		return nil, err
 	}

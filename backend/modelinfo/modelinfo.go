@@ -30,9 +30,10 @@ import (
 
 // builtinContextWindow 精确匹配的模型上下文窗口（输入+输出总容量）。
 var builtinContextWindow = map[string]int{
-	// ---- DeepSeek V4（2026-08 正式版，1M 上下文）----
+	// ---- DeepSeek V4/V4.1（2026-08 正式版，1M 上下文）----
 	"deepseek-v4-flash": 1000000, // V4 Flash：1M 上下文
 	"deepseek-v4-pro":   1000000, // V4 Pro：1M 上下文
+	"deepseek-flash":    1000000, // V4.1 Flash 正式模型名（API /models 返回 deepseek-flash）
 	// deepseek-chat / deepseek-reasoner 旧别名现已指向 V4-Flash（非思考/思考模式）
 	"deepseek-chat":     1000000,
 	"deepseek-reasoner": 1000000,
@@ -218,9 +219,10 @@ var builtinContextWindowPrefix = map[string]int{
 
 // builtinMaxOutput 精确匹配的模型输出上限（单次生成的最大 token 数）。
 var builtinMaxOutput = map[string]int{
-	// ---- DeepSeek V4（384K 输出）----
+	// ---- DeepSeek V4/V4.1（384K 输出）----
 	"deepseek-v4-flash": 384000, // V4 Flash：384K 输出
 	"deepseek-v4-pro":   384000, // V4 Pro：384K 输出
+	"deepseek-flash":    384000, // V4.1 Flash 正式模型名
 	"deepseek-chat":     384000, // 旧别名→V4 Flash 非思考
 	"deepseek-reasoner": 384000, // 旧别名→V4 Flash 思考
 	// DeepSeek V3（自部署兜底）

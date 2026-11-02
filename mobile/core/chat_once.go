@@ -42,8 +42,10 @@ func chatOnce(cfg data.AIConfig, systemPrompt, userPrompt string, maxTokens int)
 	if timeout > 150 {
 		timeout = 150
 	}
+	// 一次性调用（策略提取、连接测试）复用同一套预算，避免 600 这类
+	// 小额度在思考模型上只产出 reasoning、没有正文。
 	if maxTokens <= 0 {
-		maxTokens = 600
+		maxTokens = resolveOutputTokenBudget(cfg, systemPrompt, userPrompt)
 	}
 
 	client := resty.New().SetTimeout(time.Duration(timeout) * time.Second)
@@ -56,47 +58,65 @@ func chatOnce(cfg data.AIConfig, systemPrompt, userPrompt string, maxTokens int)
 		"model":       cfg.ModelName,
 		"stream":      false,
 		"temperature": 0,
-		"max_tokens":  maxTokens,
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": userPrompt},
 		},
 	}
 
-	req := client.R().
-		SetHeader("Authorization", "Bearer "+cfg.ApiKey).
-		SetHeader("Content-Type", "application/json").
-		SetBody(body)
-	if extra := buildExtraHeaders(cfg); len(extra) > 0 {
-		req = req.SetHeaders(extra)
-	}
-
 	logger.SugaredLogger.Infof("mobile chatOnce: model=%s base=%s", cfg.ModelName, base)
-	resp, err := req.Post(base + path)
-	if err != nil {
-		return "", fmt.Errorf("请求 AI 服务失败: %w", err)
-	}
-
 	var parsed chatCompletionResponse
-	if err := json.Unmarshal(resp.Body(), &parsed); err != nil {
-		return "", fmt.Errorf("解析 AI 响应失败: %w", err)
-	}
-	if resp.StatusCode() != 200 {
-		msg := strings.TrimSpace(resp.String())
-		if parsed.Error != nil && parsed.Error.Message != "" {
-			msg = parsed.Error.Message
+	for attempt := 0; ; attempt++ {
+		body["max_tokens"] = maxTokens
+		req := client.R().
+			SetHeader("Authorization", "Bearer "+cfg.ApiKey).
+			SetHeader("Content-Type", "application/json").
+			SetBody(body)
+		if extra := buildExtraHeaders(cfg); len(extra) > 0 {
+			req = req.SetHeaders(extra)
 		}
-		if len([]rune(msg)) > 300 {
-			msg = string([]rune(msg)[:300])
+		resp, err := req.Post(base + path)
+		if err != nil {
+			return "", fmt.Errorf("请求 AI 服务失败: %w", err)
 		}
-		return "", fmt.Errorf("AI 服务返回 %d: %s", resp.StatusCode(), msg)
+
+		parsed = chatCompletionResponse{}
+		parseErr := json.Unmarshal(resp.Body(), &parsed)
+		if resp.StatusCode() != 200 {
+			msg := strings.TrimSpace(resp.String())
+			if parseErr == nil && parsed.Error != nil && parsed.Error.Message != "" {
+				msg = parsed.Error.Message
+			}
+			if len([]rune(msg)) > 300 {
+				msg = string([]rune(msg)[:300])
+			}
+			if attempt < 3 && shouldRetryMaxTokens(resp.StatusCode(), msg) {
+				if next := nextMaxTokensAfterLimit(maxTokens); next > 0 {
+					logger.SugaredLogger.Warnf("mobile chatOnce: max_tokens=%d rejected, retry with %d: %s", maxTokens, next, msg)
+					maxTokens = next
+					continue
+				}
+			}
+			return "", fmt.Errorf("AI 服务返回 %d: %s", resp.StatusCode(), msg)
+		}
+		if parseErr != nil {
+			return "", fmt.Errorf("解析 AI 响应失败: %w", parseErr)
+		}
+		break
 	}
 	if len(parsed.Choices) == 0 {
 		return "", errors.New("AI 返回为空")
 	}
 	content := strings.TrimSpace(parsed.Choices[0].Message.Content)
+	reasoning := strings.TrimSpace(parsed.Choices[0].Message.ReasoningContent)
+	finishReason := parsed.Choices[0].FinishReason
+	logger.SugaredLogger.Infof("mobile chatOnce done: model=%s max_tokens=%d content_len=%d reasoning_len=%d finish=%s",
+		cfg.ModelName, maxTokens, len([]rune(content)), len([]rune(reasoning)), finishReason)
 	if content == "" {
-		return "", errors.New("AI 未返回文本内容")
+		if reasoning != "" {
+			return "", fmt.Errorf("AI 只返回了思考过程（%d 字，finish_reason=%s），输出额度可能被思考耗尽；请在设置中提高 MaxTokens", len([]rune(reasoning)), finishReason)
+		}
+		return "", fmt.Errorf("AI 未返回文本内容（finish_reason=%s）", finishReason)
 	}
 	return content, nil
 }

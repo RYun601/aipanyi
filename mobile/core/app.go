@@ -19,6 +19,7 @@ type mobileApp struct {
 	analysisMu     sync.Mutex
 	analysisCancel context.CancelFunc
 	analysisRunID  string
+	analysisCode   string
 }
 
 func newMobileApp(ctx context.Context) *mobileApp {
@@ -53,8 +54,8 @@ func (a *mobileApp) GetStockDetail(code string) (*stockDetailDTO, error) {
 
 // ---------------- AI 分析 ----------------
 
-func (a *mobileApp) StartAnalysis(code string, withPosition bool, positionCodes []string) (string, error) {
-	return a.startAnalysis(code, withPosition, positionCodes)
+func (a *mobileApp) StartAnalysis(code string, withPosition bool, positionCodes []string, promptID int64, question string) (string, error) {
+	return a.startAnalysis(code, withPosition, positionCodes, promptID, question)
 }
 
 func (a *mobileApp) CancelAnalysis() {
@@ -71,6 +72,7 @@ func (a *mobileApp) GetAnalysisStatus() map[string]any {
 	defer a.analysisMu.Unlock()
 	return map[string]any{
 		"runId":   a.analysisRunID,
+		"code":    a.analysisCode,
 		"running": a.analysisCancel != nil,
 	}
 }
@@ -238,7 +240,13 @@ func (a *mobileApp) TestAIConfig(cfg aiConfigDTO) (string, error) {
 	if model.BaseUrl == "" || model.ModelName == "" {
 		return "", errors.New("请先填写 BaseUrl 和模型名")
 	}
-	content, err := chatOnce(*model, "你是连通性测试助手。", "只回复 OK", 16)
+	const testSystemPrompt = "你是连通性测试助手。"
+	const testUserPrompt = "只回复 OK"
+	testMaxTokens := resolveOutputTokenBudget(*model, testSystemPrompt, testUserPrompt)
+	if testMaxTokens > 8192 {
+		testMaxTokens = 8192
+	}
+	content, err := chatOnce(*model, testSystemPrompt, testUserPrompt, testMaxTokens)
 	if err != nil {
 		return "", err
 	}
@@ -263,6 +271,12 @@ func (a *mobileApp) FetchAiModelInfo(baseUrl, apiKey, modelName, extraHeaders st
 }
 
 // ---------------- 系统提示词 ----------------
+
+// ListAnalysisPrompts 供“开始分析”弹窗使用：内置选项 + 设置里已保存的模板。
+// 与 ListPrompts 分开，避免把内置项混进模板管理列表。
+func (a *mobileApp) ListAnalysisPrompts() []promptDTO {
+	return listAnalysisPrompts()
+}
 
 func (a *mobileApp) ListPrompts() []promptDTO {
 	res := data.NewPromptTemplateApi().GetPromptTemplates("", "")

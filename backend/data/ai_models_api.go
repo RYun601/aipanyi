@@ -74,6 +74,7 @@ func FetchAiModelInfo(baseUrl, apiKey, modelName, extraHeaders string) *AiModelI
 	if apiKey != "" {
 		type modelDetail struct {
 			ID             string `json:"id"`
+			ContextWindow  int    `json:"context_window"`
 			MaxContextLen  int    `json:"max_context_length"`
 			ContextLength  int    `json:"context_length"`
 			MaxOutputTok   int    `json:"max_output_tokens"`
@@ -91,7 +92,10 @@ func FetchAiModelInfo(baseUrl, apiKey, modelName, extraHeaders string) *AiModelI
 
 		resp, err := req.Get(strings.TrimRight(baseUrl, "/") + "/models/" + modelName)
 		if err == nil && !resp.IsError() && detail.ID != "" {
-			if detail.MaxContextLen > 0 {
+			if detail.ContextWindow > 0 {
+				info.ContextWindow = detail.ContextWindow
+				info.Source = "api"
+			} else if detail.MaxContextLen > 0 {
 				info.ContextWindow = detail.MaxContextLen
 				info.Source = "api"
 			} else if detail.ContextLength > 0 {
