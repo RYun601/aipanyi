@@ -7,6 +7,16 @@ import org.junit.Test
 
 class CoreUrlTest {
     @Test
+    fun portPrefixDoesNotMatchOrigin() {
+        assertTrue(CoreUrl.shouldReload("http://127.0.0.1:40401/#/watchlist", "http://127.0.0.1:4040"))
+    }
+
+    @Test
+    fun sameOriginReloadsAfterNavigationFailure() {
+        assertTrue(CoreUrl.shouldReload("http://127.0.0.1:4040/#/watchlist", "http://127.0.0.1:4040", true))
+    }
+
+    @Test
     fun sameCoreUrlDoesNotReload() {
         assertFalse(CoreUrl.shouldReload("http://127.0.0.1:40000/#/watchlist", "http://127.0.0.1:40000"))
     }

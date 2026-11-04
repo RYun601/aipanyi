@@ -10,8 +10,44 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+internal enum class WindowAlarm { WAIT, START, RESCHEDULE, IGNORE }
+
 object MonitorScheduler {
     private const val REQ_START = 1001
+    private const val REQ_END = 1002
+    private const val START_TARGET = "registered_monitor_start"
+    const val EARLY_MS = 120_000L
+
+    internal fun startDecision(at: Long, expected: Long, end: Long, now: Long): WindowAlarm = when {
+        at <= 0 || at != expected -> WindowAlarm.IGNORE
+        now < at - EARLY_MS || (end > at && now >= end) -> WindowAlarm.RESCHEDULE
+        now < at -> WindowAlarm.WAIT
+        else -> WindowAlarm.START
+    }
+
+    fun handleAlarm(context: Context, action: String?, at: Long) {
+        val prefs = context.getSharedPreferences(AppNotifier.PREFS, Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        val start = prefs.getLong(AppNotifier.KEY_WINDOW_START, 0)
+        val end = prefs.getLong(AppNotifier.KEY_WINDOW_END, 0)
+        RuntimeLog.info("MonitorScheduler", "alarm action=$action target=${format(at)} actual=${format(now)} exact=${canScheduleExactAlarms(context)}")
+        if (action == MonitorAlarmReceiver.ACTION_END) {
+            if (at <= 0 || at != end) return
+            if (now < at) scheduleAlarm(context, at, endAlarm = true)
+            else MonitorService.onWindowEnd()
+            return
+        }
+        if (action != MonitorAlarmReceiver.ACTION_ALARM) return
+        val decision = startDecision(at, prefs.getLong(START_TARGET, 0), if (at == start) end else 0, now)
+        when (decision) {
+            WindowAlarm.IGNORE -> Unit
+            WindowAlarm.RESCHEDULE -> scheduleNext(context, "stale_window")
+            WindowAlarm.START, WindowAlarm.WAIT -> {
+                prefs.edit().remove(START_TARGET).apply()
+                startMonitorService(context, "alarm_${decision.name.lowercase()}", MonitorService.ACTION_ALARM_START, at)
+            }
+        }
+    }
 
     fun applySchedule(context: Context, startMs: Long, endMs: Long, nextStartMs: Long) {
         val prefs = context.getSharedPreferences(AppNotifier.PREFS, Context.MODE_PRIVATE)
@@ -28,8 +64,10 @@ object MonitorScheduler {
         )
 
         val active = startMs > 0 && startMs <= now && now < endMs
+        if (!active) cancelAlarm(context, endAlarm = true)
         if (active) {
-            startMonitorService(context, "schedule_active")
+            if (!MonitorService.isRunning) startMonitorService(context, "schedule_active")
+            scheduleAlarm(context, endMs, endAlarm = true)
             if (nextStartMs > now) scheduleStart(context, nextStartMs) else cancelStartAlarm(context)
         } else if (startMs > now) {
             scheduleStart(context, startMs)
@@ -61,6 +99,7 @@ object MonitorScheduler {
         val now = System.currentTimeMillis()
         if (start > 0 && start <= now && now < end) {
             RuntimeLog.info("MonitorScheduler", "boot inside window start=${format(start)} end=${format(end)}")
+            scheduleAlarm(context, end, endAlarm = true)
             startMonitorService(context, "boot_active")
             return
         }
@@ -81,10 +120,11 @@ object MonitorScheduler {
         return am.canScheduleExactAlarms()
     }
 
-    fun startMonitorService(context: Context, reason: String, action: String? = null) {
+    fun startMonitorService(context: Context, reason: String, action: String? = null, target: Long = 0) {
         try {
             val intent = Intent(context, MonitorService::class.java)
             if (action != null) intent.action = action
+            intent.putExtra(MonitorAlarmReceiver.EXTRA_TARGET, target)
             ContextCompat.startForegroundService(context, intent)
             RuntimeLog.info("MonitorScheduler", "start service requested reason=$reason action=${action ?: "-"}")
         } catch (t: Throwable) {
@@ -102,15 +142,23 @@ object MonitorScheduler {
     }
 
     private fun scheduleStart(context: Context, atMs: Long) {
-        val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        context.getSharedPreferences(AppNotifier.PREFS, Context.MODE_PRIVATE)
+            .edit().putLong(START_TARGET, atMs).apply()
+        scheduleAlarm(context, atMs, endAlarm = false)
+    }
+
+    private fun pendingAlarm(context: Context, endAlarm: Boolean, atMs: Long?, flags: Int): PendingIntent? {
         val intent = Intent(context, MonitorAlarmReceiver::class.java)
-            .setAction(MonitorAlarmReceiver.ACTION_ALARM)
-        val pi = PendingIntent.getBroadcast(
-            context,
-            REQ_START,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            .setAction(if (endAlarm) MonitorAlarmReceiver.ACTION_END else MonitorAlarmReceiver.ACTION_ALARM)
+        if (atMs != null) intent.putExtra(MonitorAlarmReceiver.EXTRA_TARGET, atMs)
+        return PendingIntent.getBroadcast(
+            context, if (endAlarm) REQ_END else REQ_START, intent, flags or PendingIntent.FLAG_IMMUTABLE
         )
+    }
+
+    private fun scheduleAlarm(context: Context, atMs: Long, endAlarm: Boolean) {
+        val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val pi = pendingAlarm(context, endAlarm, atMs, PendingIntent.FLAG_UPDATE_CURRENT) ?: return
         val exact = canScheduleExactAlarms(context)
         try {
             if (exact) {
@@ -118,7 +166,7 @@ object MonitorScheduler {
             } else {
                 am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMs, pi)
             }
-            RuntimeLog.info("MonitorScheduler", "alarm scheduled at=${format(atMs)} exact=$exact")
+            RuntimeLog.info("MonitorScheduler", "alarm scheduled end=$endAlarm at=${format(atMs)} exact=$exact")
         } catch (t: Throwable) {
             RuntimeLog.error("MonitorScheduler", "alarm schedule failed at=${format(atMs)} exact=$exact", t)
             try {
@@ -131,17 +179,14 @@ object MonitorScheduler {
     }
 
     private fun cancelStartAlarm(context: Context) {
+        context.getSharedPreferences(AppNotifier.PREFS, Context.MODE_PRIVATE)
+            .edit().remove(START_TARGET).apply()
+        cancelAlarm(context, endAlarm = false)
+    }
+
+    private fun cancelAlarm(context: Context, endAlarm: Boolean) {
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val intent = Intent(context, MonitorAlarmReceiver::class.java)
-            .setAction(MonitorAlarmReceiver.ACTION_ALARM)
-        val pi = PendingIntent.getBroadcast(
-            context,
-            REQ_START,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        am.cancel(pi)
-        RuntimeLog.info("MonitorScheduler", "alarm cancelled")
+        pendingAlarm(context, endAlarm, null, PendingIntent.FLAG_NO_CREATE)?.let(am::cancel)
     }
 
     private fun format(ms: Long): String {
