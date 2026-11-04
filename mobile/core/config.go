@@ -2,6 +2,7 @@ package mobilecore
 
 import (
 	"errors"
+	"strings"
 
 	"aipanyi/backend/data"
 	"aipanyi/backend/db"
@@ -50,7 +51,28 @@ func saveMobileSettings(s mobileSettings) error {
 	if s.PollIntervalSec < 10 {
 		return errors.New("轮询间隔不能小于 10 秒")
 	}
-	return db.Dao.Save(&s).Error
+	// The trade fee is saved separately, so a stale settings form cannot overwrite it.
+	return db.Dao.Omit("TradeFeeRate").Save(&s).Error
+}
+
+func saveTradeFeeRate(raw string) (string, error) {
+	rate := strings.TrimSpace(raw)
+	if rate != "" {
+		fixed, err := parseTradeMoney(rate)
+		if err != nil || fixed > 100*tradeScale {
+			return "", errors.New("交易费率须为 0 到 100 的百分数，最多 4 位小数")
+		}
+		rate = strings.TrimRight(strings.TrimRight(formatTradeMoney(fixed), "0"), ".")
+	}
+	loadMobileSettings()
+	result := db.Dao.Model(&mobileSettings{}).Where("id = ?", settingsRowID).UpdateColumn("trade_fee_rate", rate)
+	if result.Error != nil {
+		return "", result.Error
+	}
+	if result.RowsAffected != 1 {
+		return "", errors.New("无法保存交易费率")
+	}
+	return rate, nil
 }
 
 func settingsDTO(s mobileSettings) mobileSettingsDTO {
@@ -62,6 +84,7 @@ func settingsDTO(s mobileSettings) mobileSettingsDTO {
 		EnableTools:       s.EnableTools,
 		Thinking:          s.Thinking,
 		PushEnabled:       s.PushEnabled,
+		TradeFeeRate:      s.TradeFeeRate,
 	}
 }
 

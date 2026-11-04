@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { showConfirmDialog, showToast } from 'vant'
 import { api, submitTradeDraft } from '../api'
+import { calculateTradeFee } from '../tradeFee'
 
 const props = defineProps({
   show: Boolean,
@@ -19,6 +20,8 @@ const saving = ref(false)
 const uncertain = ref(null)
 const firstBaseline = ref(false)
 const verifiedPosition = ref(null)
+const feeRate = ref('')
+const feeValue = computed(() => form.feeEdited ? form.fee : calculateTradeFee(form.quantity, form.price, feeRate.value))
 const position = computed(() => props.position || (verifiedPosition.value?.revision ? verifiedPosition.value : null))
 const isBaseline = computed(() => props.baseline || firstBaseline.value)
 const needsBaseline = computed(() => !isBaseline.value && !props.fill && !position.value)
@@ -29,6 +32,7 @@ const submitLabel = computed(() => {
   return needsBaseline.value ? '继续核对期初' : '预览并确认'
 })
 let fillDraft = null
+let feeRateRequest = 0
 
 function localTime(value = Date.now()) {
   const date = new Date(value)
@@ -42,19 +46,33 @@ function initializeForm(baseline, at) {
     quantity: baseline ? String(position.value?.quantity ?? props.legacyVolume) : String(props.fill?.quantity || ''),
     price: baseline ? String(position.value?.averageCost ?? Number(props.legacyCost || 0).toFixed(4)) : props.fill?.price || '',
     fee: props.fill?.fee || '',
-    zeroFee: false,
+    feeEdited: !!props.fill,
     note: props.fill?.note || '',
     at: localTime(at)
   })
 }
 
-watch(() => props.show, (open) => {
+watch(() => props.show, async (open) => {
+  const request = ++feeRateRequest
   if (!open || uncertain.value) return
   firstBaseline.value = false
   verifiedPosition.value = null
   fillDraft = null
+  feeRate.value = ''
   initializeForm(props.baseline, props.fill?.at || Date.now())
+  if (props.baseline || props.fill) return
+  try {
+    const settings = await api.getSettings()
+    if (request === feeRateRequest) feeRate.value = settings?.tradeFeeRate ?? ''
+  } catch {
+    // The fee field stays editable if settings cannot be read.
+  }
 })
+
+function editFee(value) {
+  form.fee = value
+  form.feeEdited = true
+}
 
 function returnToFill() {
   Object.assign(form, fillDraft)
@@ -80,9 +98,10 @@ function makeRequest() {
     return { kind: 'baseline', input: { ...base, at: at.toISOString(), quantity, unitCost: form.price } }
   }
   if (quantity === 0) throw new Error('成交股数必须大于 0')
-  if (!form.fee.trim() && !form.zeroFee) throw new Error('请填写费用，或确认费用为 0')
+  const fee = feeValue.value.trim()
+  if (!fee) throw new Error('请填写费用，或确认费用为 0')
   const fill = {
-    ...base, at: at.toISOString(), quantity, price: form.price, fee: form.fee || '0',
+    ...base, at: at.toISOString(), quantity, price: form.price, fee,
     side: form.side, note: form.note, alertEventId: props.fill?.alertEventId || props.alertEventId || 0
   }
   return props.fill ? { kind: 'correction', input: { ...base, targetId: props.fill.id, replacement: fill } }
@@ -181,8 +200,19 @@ async function save() {
           </template>
         </van-field>
         <template v-if="!isBaseline">
-          <van-field v-model="form.fee" type="number" label="费用" :disabled="saving || !!uncertain" />
-          <van-checkbox v-if="!form.fee" v-model="form.zeroFee" style="padding: 8px 16px" :disabled="saving || !!uncertain">费用按 0 记</van-checkbox>
+          <van-field
+            :model-value="feeValue"
+            type="number"
+            label="费用"
+            :disabled="saving || !!uncertain"
+            @update:model-value="editFee"
+          >
+            <template v-if="feeRate !== '' && form.feeEdited" #button>
+              <van-button size="small" plain :disabled="saving || !!uncertain" @click="form.feeEdited = false">恢复自动</van-button>
+            </template>
+          </van-field>
+          <div v-if="feeRate !== '' && !form.feeEdited" class="muted" style="padding: 4px 16px">按 {{ feeRate }}% 自动计算，可修改为实际费用。</div>
+          <van-checkbox v-if="!feeValue" :model-value="false" style="padding: 8px 16px" :disabled="saving || !!uncertain" @update:model-value="editFee('0')">费用按 0 记</van-checkbox>
           <van-field v-model="form.note" label="备注" placeholder="可选" maxlength="200" :disabled="saving || !!uncertain" />
         </template>
       </van-cell-group>

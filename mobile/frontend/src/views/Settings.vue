@@ -6,6 +6,8 @@ import { isNative, native } from '../native'
 
 const loading = ref(true)
 const settings = ref(null)
+const tradeFeeRate = ref('')
+const savingTradeFeeRate = ref(false)
 const aiConfigs = ref([])
 const prompts = ref([])
 const builtinPrompts = ref([])
@@ -93,6 +95,7 @@ async function load() {
       api.listAnalysisPrompts().catch(() => [])
     ])
     settings.value = s
+    tradeFeeRate.value = s?.tradeFeeRate ?? ''
     aiConfigs.value = a || []
     prompts.value = p || []
     builtinPrompts.value = (ap || []).filter((x) => Number(x.id) < 0)
@@ -104,6 +107,20 @@ async function load() {
     loading.value = false
   }
   refreshNative()
+}
+
+async function saveTradeFeeRate() {
+  if (savingTradeFeeRate.value) return
+  savingTradeFeeRate.value = true
+  try {
+    const rate = await api.setTradeFeeRate(tradeFeeRate.value)
+    tradeFeeRate.value = rate
+    showToast(rate === '' ? '已切换为手动填写费用' : '交易费率已保存')
+  } catch (e) {
+    showToast(e?.message || '保存交易费率失败')
+  } finally {
+    savingTradeFeeRate.value = false
+  }
 }
 
 function refreshNative() {
@@ -398,6 +415,24 @@ onMounted(load)
     <van-loading v-if="loading && !settings" style="padding: 80px 0" vertical>加载中</van-loading>
 
     <template v-else-if="settings">
+      <div class="card">
+        <div style="font-size: 17px; font-weight: 650">成交记账</div>
+        <van-field
+          v-model="tradeFeeRate"
+          type="number"
+          label="交易费率 %"
+          placeholder="留空为手动填写"
+          input-align="right"
+          clearable
+          :disabled="savingTradeFeeRate"
+        >
+          <template #button>
+            <van-button size="small" type="primary" plain :loading="savingTradeFeeRate" @click="saveTradeFeeRate">保存费率</van-button>
+          </template>
+        </van-field>
+        <div class="muted">买入和卖出共用。填 0.03 表示 0.03%，按成交金额计算，费用四舍五入到分。</div>
+      </div>
+
       <div class="card">
         <div class="row">
           <div style="font-size: 17px; font-weight: 650">AI 模型配置</div>

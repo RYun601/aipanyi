@@ -27,6 +27,41 @@ func setupTradeTestDB(t *testing.T) {
 	}
 }
 
+func TestTradeFeeRateSetting(t *testing.T) {
+	setupTradeTestDB(t)
+	if err := db.Dao.AutoMigrate(&mobileSettings{}); err != nil {
+		t.Fatal(err)
+	}
+	stale := mobileSettings{ID: settingsRowID, DefaultAIConfigID: 7, PollIntervalSec: 30}
+	if err := db.Dao.Create(&stale).Error; err != nil {
+		t.Fatal(err)
+	}
+	app := newMobileApp(t.Context())
+	if got := app.GetMobileSettings().TradeFeeRate; got != "" {
+		t.Fatalf("old settings have fee rate %q, want blank", got)
+	}
+	if got, err := app.SetTradeFeeRate(" 0.0300 "); err != nil || got != "0.03" {
+		t.Fatalf("save rate = %q, %v", got, err)
+	}
+	if err := saveMobileSettings(stale); err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range []string{"-1", "100.0001", "0.00001", "1%"} {
+		if _, err := app.SetTradeFeeRate(invalid); err == nil {
+			t.Fatalf("accepted invalid fee rate %q", invalid)
+		}
+	}
+	if s := app.GetMobileSettings(); s.TradeFeeRate != "0.03" || s.DefaultAIConfigID != 7 {
+		t.Fatalf("settings after unrelated save = %+v", s)
+	}
+	if got, err := app.SetTradeFeeRate("0"); err != nil || got != "0" {
+		t.Fatalf("zero rate = %q, %v", got, err)
+	}
+	if _, err := app.SetTradeFeeRate(""); err != nil || app.GetMobileSettings().TradeFeeRate != "" {
+		t.Fatalf("clear rate error = %v", err)
+	}
+}
+
 func TestTradeDraftSurvivesCommitBeforeAcknowledgment(t *testing.T) {
 	setupTradeTestDB(t)
 	at := baselineTrade(t)

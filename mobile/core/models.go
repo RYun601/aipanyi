@@ -71,6 +71,7 @@ type mobileSettings struct {
 	EnableTools       bool
 	Thinking          bool
 	PushEnabled       bool
+	TradeFeeRate      string `gorm:"not null;default:''"`
 }
 
 func (mobileSettings) TableName() string { return "mobile_settings" }
@@ -212,13 +213,14 @@ type promptDTO struct {
 }
 
 type mobileSettingsDTO struct {
-	DefaultAIConfigID int64 `json:"defaultAiConfigId"`
-	DefaultPromptID   int64 `json:"defaultPromptId"`
-	AutoExtractAlerts bool  `json:"autoExtractAlerts"`
-	PollIntervalSec   int   `json:"pollIntervalSec"`
-	EnableTools       bool  `json:"enableTools"`
-	Thinking          bool  `json:"thinking"`
-	PushEnabled       bool  `json:"pushEnabled"`
+	DefaultAIConfigID int64  `json:"defaultAiConfigId"`
+	DefaultPromptID   int64  `json:"defaultPromptId"`
+	AutoExtractAlerts bool   `json:"autoExtractAlerts"`
+	PollIntervalSec   int    `json:"pollIntervalSec"`
+	EnableTools       bool   `json:"enableTools"`
+	Thinking          bool   `json:"thinking"`
+	PushEnabled       bool   `json:"pushEnabled"`
+	TradeFeeRate      string `json:"tradeFeeRate"`
 }
 
 type versionDTO struct {
