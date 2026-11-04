@@ -62,6 +62,39 @@ func TestTradeFeeRateSetting(t *testing.T) {
 	}
 }
 
+func TestTradeFeeRulesKeepBuyAndSellSeparate(t *testing.T) {
+	setupTradeTestDB(t)
+	if err := db.Dao.AutoMigrate(&mobileSettings{}); err != nil {
+		t.Fatal(err)
+	}
+	stale := mobileSettings{ID: settingsRowID, PollIntervalSec: 30, TradeFeeRate: "0.03"}
+	if err := db.Dao.Create(&stale).Error; err != nil {
+		t.Fatal(err)
+	}
+	app := newMobileApp(t.Context())
+	if got := app.GetMobileSettings().TradeFeeRules; got.Buy.Rate != "0.03" || got.Sell.Rate != "0.03" {
+		t.Fatalf("legacy rates = %+v", got)
+	}
+	saved, err := app.SetTradeFeeRules(tradeFeeRules{
+		Buy:  tradeFeeRule{Mode: "fixed", Rate: "0.01"},
+		Sell: tradeFeeRule{Mode: "aShare", Commission: " 0.850 ", Minimum: "0.50"},
+	})
+	if err != nil || saved.Buy.Rate != "0.01" || saved.Sell.Commission != "0.85" || saved.Sell.Minimum != "0.5" {
+		t.Fatalf("saved rules = %+v, %v", saved, err)
+	}
+	invalid := saved
+	invalid.Sell.Minimum = "0.505"
+	if _, err := app.SetTradeFeeRules(invalid); err == nil {
+		t.Fatal("accepted a minimum commission with a fractional cent")
+	}
+	if err := saveMobileSettings(stale); err != nil {
+		t.Fatal(err)
+	}
+	if got := app.GetMobileSettings().TradeFeeRules; got != saved {
+		t.Fatalf("persisted rules = %+v, want %+v", got, saved)
+	}
+}
+
 func TestTradeDraftSurvivesCommitBeforeAcknowledgment(t *testing.T) {
 	setupTradeTestDB(t)
 	at := baselineTrade(t)

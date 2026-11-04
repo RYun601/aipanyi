@@ -122,7 +122,7 @@ export const api = {
   // 设置
   getSettings: () => call('GetMobileSettings'),
   saveSettings: (s) => call('SaveMobileSettings', s),
-  setTradeFeeRate: (rate) => call('SetTradeFeeRate', rate),
+  setTradeFeeRules: (rules) => call('SetTradeFeeRules', rules),
   getVersionInfo: () => call('GetVersionInfo'),
   getMonitorStatus: () => call('GetMonitorStatus'),
   getDataSummary: () => call('GetDataSummary'),

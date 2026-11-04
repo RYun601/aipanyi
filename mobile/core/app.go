@@ -465,6 +465,10 @@ func (a *mobileApp) SetTradeFeeRate(rate string) (string, error) {
 	return saveTradeFeeRate(rate)
 }
 
+func (a *mobileApp) SetTradeFeeRules(rules tradeFeeRules) (tradeFeeRules, error) {
+	return saveTradeFeeRules(rules)
+}
+
 func (a *mobileApp) SaveMobileSettings(s mobileSettingsDTO) (string, error) {
 	cur := loadMobileSettings()
 	cur.DefaultAIConfigID = s.DefaultAIConfigID

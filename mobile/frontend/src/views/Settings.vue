@@ -6,8 +6,11 @@ import { isNative, native } from '../native'
 
 const loading = ref(true)
 const settings = ref(null)
-const tradeFeeRate = ref('')
-const savingTradeFeeRate = ref(false)
+const exampleAShareFees = { mode: 'aShare', commission: '0.853', minimum: '0.50' }
+const tradeFeeRules = ref({ buy: newFeeRule(), sell: newFeeRule() })
+const activeFeeSide = ref('buy')
+const activeFeeRule = computed(() => tradeFeeRules.value[activeFeeSide.value])
+const savingTradeFeeRules = ref(false)
 const aiConfigs = ref([])
 const prompts = ref([])
 const builtinPrompts = ref([])
@@ -95,7 +98,7 @@ async function load() {
       api.listAnalysisPrompts().catch(() => [])
     ])
     settings.value = s
-    tradeFeeRate.value = s?.tradeFeeRate ?? ''
+    loadTradeFeeRules(s?.tradeFeeRules)
     aiConfigs.value = a || []
     prompts.value = p || []
     builtinPrompts.value = (ap || []).filter((x) => Number(x.id) < 0)
@@ -109,17 +112,33 @@ async function load() {
   refreshNative()
 }
 
-async function saveTradeFeeRate() {
-  if (savingTradeFeeRate.value) return
-  savingTradeFeeRate.value = true
+function newFeeRule(rule) {
+  return {
+    mode: rule?.mode || 'fixed',
+    rate: rule?.rate ?? '',
+    commission: rule?.commission || exampleAShareFees.commission,
+    minimum: rule?.minimum || exampleAShareFees.minimum
+  }
+}
+
+function loadTradeFeeRules(rules) {
+  tradeFeeRules.value = { buy: newFeeRule(rules?.buy), sell: newFeeRule(rules?.sell) }
+}
+
+function useAShareExample() {
+  loadTradeFeeRules({ buy: exampleAShareFees, sell: exampleAShareFees })
+}
+
+async function saveTradeFeeRules() {
+  if (savingTradeFeeRules.value) return
+  savingTradeFeeRules.value = true
   try {
-    const rate = await api.setTradeFeeRate(tradeFeeRate.value)
-    tradeFeeRate.value = rate
-    showToast(rate === '' ? '已切换为手动填写费用' : '交易费率已保存')
+    loadTradeFeeRules(await api.setTradeFeeRules(tradeFeeRules.value))
+    showToast('买入和卖出费用已保存')
   } catch (e) {
-    showToast(e?.message || '保存交易费率失败')
+    showToast(e?.message || '保存交易费用失败')
   } finally {
-    savingTradeFeeRate.value = false
+    savingTradeFeeRules.value = false
   }
 }
 
@@ -416,21 +435,30 @@ onMounted(load)
 
     <template v-else-if="settings">
       <div class="card">
-        <div style="font-size: 17px; font-weight: 650">成交记账</div>
-        <van-field
-          v-model="tradeFeeRate"
-          type="number"
-          label="交易费率 %"
-          placeholder="留空为手动填写"
-          input-align="right"
-          clearable
-          :disabled="savingTradeFeeRate"
-        >
-          <template #button>
-            <van-button size="small" type="primary" plain :loading="savingTradeFeeRate" @click="saveTradeFeeRate">保存费率</van-button>
+        <div class="row">
+          <div style="font-size: 17px; font-weight: 650">成交记账</div>
+          <van-button size="small" plain :disabled="savingTradeFeeRules" @click="useAShareExample">套用 A 股示例</van-button>
+        </div>
+        <van-tabs v-model:active="activeFeeSide" shrink>
+          <van-tab name="buy" title="买入费用" />
+          <van-tab name="sell" title="卖出费用" />
+        </van-tabs>
+        <van-field label="计算方式">
+          <template #input>
+            <van-radio-group v-model="activeFeeRule.mode" direction="horizontal" :disabled="savingTradeFeeRules">
+              <van-radio name="fixed">固定费率</van-radio>
+              <van-radio name="aShare">沪深 A 股估算</van-radio>
+            </van-radio-group>
           </template>
         </van-field>
-        <div class="muted">买入和卖出共用。填 0.03 表示 0.03%，按成交金额计算，费用四舍五入到分。</div>
+        <template v-if="activeFeeRule.mode === 'aShare'">
+          <van-field v-model="activeFeeRule.commission" type="number" label="佣金（万分之）" input-align="right" :disabled="savingTradeFeeRules" />
+          <van-field v-model="activeFeeRule.minimum" type="number" label="最低佣金（元）" input-align="right" :disabled="savingTradeFeeRules" />
+          <div class="muted">自动估算过户费。{{ activeFeeSide === 'sell' ? '卖出加计印花税。' : '买入免印花税。' }}</div>
+        </template>
+        <van-field v-else v-model="activeFeeRule.rate" type="number" label="总费率 %" placeholder="留空为手动填写"
+          input-align="right" clearable :disabled="savingTradeFeeRules" />
+        <van-button type="primary" block round style="margin-top: 8px" :loading="savingTradeFeeRules" @click="saveTradeFeeRules">保存买卖费用</van-button>
       </div>
 
       <div class="card">

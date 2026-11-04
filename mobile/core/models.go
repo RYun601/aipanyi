@@ -72,6 +72,7 @@ type mobileSettings struct {
 	Thinking          bool
 	PushEnabled       bool
 	TradeFeeRate      string `gorm:"not null;default:''"`
+	TradeFeeRulesJSON string `gorm:"not null;default:''"`
 }
 
 func (mobileSettings) TableName() string { return "mobile_settings" }
@@ -213,14 +214,27 @@ type promptDTO struct {
 }
 
 type mobileSettingsDTO struct {
-	DefaultAIConfigID int64  `json:"defaultAiConfigId"`
-	DefaultPromptID   int64  `json:"defaultPromptId"`
-	AutoExtractAlerts bool   `json:"autoExtractAlerts"`
-	PollIntervalSec   int    `json:"pollIntervalSec"`
-	EnableTools       bool   `json:"enableTools"`
-	Thinking          bool   `json:"thinking"`
-	PushEnabled       bool   `json:"pushEnabled"`
-	TradeFeeRate      string `json:"tradeFeeRate"`
+	DefaultAIConfigID int64         `json:"defaultAiConfigId"`
+	DefaultPromptID   int64         `json:"defaultPromptId"`
+	AutoExtractAlerts bool          `json:"autoExtractAlerts"`
+	PollIntervalSec   int           `json:"pollIntervalSec"`
+	EnableTools       bool          `json:"enableTools"`
+	Thinking          bool          `json:"thinking"`
+	PushEnabled       bool          `json:"pushEnabled"`
+	TradeFeeRate      string        `json:"tradeFeeRate"`
+	TradeFeeRules     tradeFeeRules `json:"tradeFeeRules"`
+}
+
+type tradeFeeRule struct {
+	Mode       string `json:"mode"`
+	Rate       string `json:"rate"`
+	Commission string `json:"commission"`
+	Minimum    string `json:"minimum"`
+}
+
+type tradeFeeRules struct {
+	Buy  tradeFeeRule `json:"buy"`
+	Sell tradeFeeRule `json:"sell"`
 }
 
 type versionDTO struct {
