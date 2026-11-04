@@ -41,10 +41,13 @@ object MonitorScheduler {
         val decision = startDecision(at, prefs.getLong(START_TARGET, 0), if (at == start) end else 0, now)
         when (decision) {
             WindowAlarm.IGNORE -> Unit
-            WindowAlarm.RESCHEDULE -> scheduleNext(context, "stale_window")
+            WindowAlarm.RESCHEDULE -> scheduleNext(context, "stale_window", refreshIfMissing = true)
             WindowAlarm.START, WindowAlarm.WAIT -> {
                 prefs.edit().remove(START_TARGET).apply()
-                startMonitorService(context, "alarm_${decision.name.lowercase()}", MonitorService.ACTION_ALARM_START, at)
+                if (!MonitorService.deliverOpeningAlarm(at) &&
+                    !startMonitorService(context, "alarm_${decision.name.lowercase()}", MonitorService.ACTION_ALARM_START, at)) {
+                    scheduleNext(context, "alarm_launch_rejected", after = at)
+                }
             }
         }
     }
@@ -78,17 +81,25 @@ object MonitorScheduler {
         }
     }
 
-    fun scheduleNext(context: Context, reason: String) {
+    fun scheduleNext(context: Context, reason: String, refreshIfMissing: Boolean = false, after: Long = 0) {
         val prefs = context.getSharedPreferences(AppNotifier.PREFS, Context.MODE_PRIVATE)
         val start = prefs.getLong(AppNotifier.KEY_WINDOW_START, 0)
         val next = prefs.getLong(AppNotifier.KEY_NEXT_START, 0)
-        val now = System.currentTimeMillis()
+        val now = maxOf(System.currentTimeMillis(), after)
         val at = when {
             start > now -> start
             next > now -> next
             else -> 0L
         }
-        if (at > 0) scheduleStart(context, at) else cancelStartAlarm(context)
+        if (at > 0) {
+            scheduleStart(context, at)
+        } else {
+            cancelStartAlarm(context)
+            if (refreshIfMissing && prefs.getInt(AppNotifier.KEY_ACTIVE, 0) > 0 &&
+                !MonitorService.deliverOpeningAlarm(0)) {
+                startMonitorService(context, "recompute_schedule", MonitorService.ACTION_ALARM_START)
+            }
+        }
         RuntimeLog.info("MonitorScheduler", "scheduleNext reason=$reason at=${format(at)}")
     }
 
@@ -103,7 +114,7 @@ object MonitorScheduler {
             startMonitorService(context, "boot_active")
             return
         }
-        scheduleNext(context, "boot")
+        scheduleNext(context, "boot_or_clock_change", refreshIfMissing = true)
     }
 
     fun isInWindow(context: Context): Boolean {
@@ -120,13 +131,14 @@ object MonitorScheduler {
         return am.canScheduleExactAlarms()
     }
 
-    fun startMonitorService(context: Context, reason: String, action: String? = null, target: Long = 0) {
-        try {
+    fun startMonitorService(context: Context, reason: String, action: String? = null, target: Long = 0): Boolean {
+        return try {
             val intent = Intent(context, MonitorService::class.java)
             if (action != null) intent.action = action
             intent.putExtra(MonitorAlarmReceiver.EXTRA_TARGET, target)
             ContextCompat.startForegroundService(context, intent)
             RuntimeLog.info("MonitorScheduler", "start service requested reason=$reason action=${action ?: "-"}")
+            true
         } catch (t: Throwable) {
             RuntimeLog.error("MonitorScheduler", "start service failed reason=$reason action=${action ?: "-"}", t)
             try {
@@ -138,6 +150,7 @@ object MonitorScheduler {
                 )
             } catch (_: Throwable) {
             }
+            false
         }
     }
 

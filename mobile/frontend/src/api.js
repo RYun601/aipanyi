@@ -64,6 +64,21 @@ export const api = {
   setPosition: (code, costPrice, volume) => call('SetPosition', code, Number(costPrice) || 0, Number(volume) || 0),
   getStockDetail: (code) => call('GetStockDetail', code),
 
+  // 成交账本与本地策略
+  stageTradeDraft: (draft) => call('StageTradeDraft', draft),
+  getTradeDraft: (code) => call('GetTradeDraft', code),
+  acknowledgeTradeDraft: (code, id) => call('AcknowledgeTradeDraft', code, id),
+  getTradePosition: (code) => call('GetTradePosition', code),
+  previewTradeBaseline: (input) => call('PreviewTradeBaseline', input),
+  setTradeBaseline: (input) => call('SetTradeBaseline', input),
+  previewTrade: (input) => call('PreviewTrade', input),
+  recordTrade: (input) => call('RecordTrade', input),
+  previewTradeCorrection: (input) => call('PreviewTradeCorrection', input),
+  correctTrade: (input) => call('CorrectTrade', input),
+  listTrades: (code, beforeId, limit) => call('ListTrades', code, beforeId, limit),
+  getTradeStrategy: (code) => call('GetTradeStrategy', code),
+  refreshTradeStrategy: (code) => call('RefreshTradeStrategy', code),
+
   // AI 分析
   startAnalysis: (code, withPosition = false, positionCodes = [], promptId = 0, question = '') =>
     call(
@@ -101,6 +116,7 @@ export const api = {
   saveAlertSuggestions: (items) => call('SaveAlertSuggestions', items),
   deleteAlert: (id) => call('DeleteAlert', Number(id)),
   setAlertEnabled: (id, enabled) => call('SetAlertEnabled', Number(id), !!enabled),
+  getAlertContext: (code, id) => call('GetAlertContext', code, Number(id)),
   listAlertEvents: (limit = 100) => call('ListAlertEvents', Number(limit)),
 
   // 设置
@@ -110,4 +126,23 @@ export const api = {
   getMonitorStatus: () => call('GetMonitorStatus'),
   getDataSummary: () => call('GetDataSummary'),
   sendTestNotification: () => call('SendTestNotification')
+}
+
+export async function submitTradeDraft(draft) {
+  await api.stageTradeDraft(draft)
+  const submit = {
+    baseline: api.setTradeBaseline,
+    fill: api.recordTrade,
+    correction: api.correctTrade
+  }[draft.kind]
+  let result
+  try {
+    result = await submit(draft.input)
+  } catch (error) {
+    if (!error.status || error.status >= 500) throw error
+    await api.acknowledgeTradeDraft(draft.input.code, draft.input.requestId).catch(() => {})
+    throw error
+  }
+  await api.acknowledgeTradeDraft(draft.input.code, draft.input.requestId).catch(() => {})
+  return result
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"aipanyi/backend/data"
-	"aipanyi/backend/events"
+	"aipanyi/backend/db"
 	"aipanyi/backend/logger"
 )
 
@@ -166,20 +166,33 @@ func (a *mobileApp) runAnalysis(ctx context.Context, runID, code, name string, a
 		return
 	}
 	logger.SugaredLogger.Infof("mobile analysis start: run=%s code=%s name=%s ai=%d model=%s", runID, code, name, aiConfigID, cfg.ModelName)
+	currentIncluded := withPosition && containsCode(positionCodes, code)
+	var basis *int64
+	portfolioWriteMu.Lock()
 	follow := data.NewStockDataApi().GetFollowedStockByStockCode(code)
-	logger.SugaredLogger.Infof("mobile analysis: follow cost=%.2f volume=%d storedPrice=%.2f", follow.CostPrice, follow.Volume, follow.Price)
+	if currentIncluded {
+		position, err := readTradePosition(db.Dao, code)
+		if err != nil {
+			portfolioWriteMu.Unlock()
+			emitMobile("mobileAnalysis", map[string]any{
+				"runId": runID, "code": code, "done": true, "error": "无法读取当前持仓，请重试",
+			})
+			return
+		}
+		basis = &position.Revision
+	}
+	portfolioWriteMu.Unlock()
 	price := quickPrice(code, follow.Price)
 	logger.SugaredLogger.Infof("mobile analysis: price=%.2f", price)
 	cost := follow.CostPrice
 	volume := follow.Volume
-	currentIncluded := withPosition && containsCode(positionCodes, code)
 	kline := quickKLine(code)
 	logger.SugaredLogger.Infof("mobile analysis: kline len=%d", len(kline))
 
 	portfolioBlock := ""
 	portfolioCount := 0
 	if withPosition {
-		portfolioBlock, portfolioCount = buildPortfolioPrompt(code, price, positionCodes)
+		portfolioBlock, portfolioCount = buildPortfolioPrompt(code, price, positionCodes, follow)
 	}
 	logger.SugaredLogger.Infof("mobile analysis: portfolio positions=%d currentIncluded=%v", portfolioCount, currentIncluded)
 
@@ -227,6 +240,14 @@ func (a *mobileApp) runAnalysis(ctx context.Context, runID, code, name string, a
 		return
 	}
 
+	if basis != nil {
+		if err := db.Dao.Create(&analysisAlertBasis{ChatID: chatID, PositionRevision: *basis}).Error; err != nil {
+			emitMobile("mobileAnalysis", map[string]any{
+				"runId": runID, "code": code, "done": true, "error": "无法保存分析的持仓版本，请重试",
+			})
+			return
+		}
+	}
 	data.NewDeepSeekOpenAi(ctx, int(aiConfigID)).SaveAIResponseResult(code, name, final, chatID, userPrompt)
 	emitMobile("mobileAnalysis", map[string]any{
 		"runId": runID, "code": code, "done": true, "saved": true,
@@ -244,14 +265,10 @@ func (a *mobileApp) runAnalysis(ctx context.Context, runID, code, name string, a
 		logger.SugaredLogger.Warnf("mobile: extract alerts failed: %v", err)
 		return
 	}
+	assignSuggestionBasis(suggestions, basis)
 	emitMobile("mobileAlertSuggestions", map[string]any{
 		"code": code, "name": name, "suggestions": suggestions,
 	})
-}
-
-func emitMobile(event string, payload map[string]any) {
-	defer func() { _ = recover() }()
-	events.Emit(context.Background(), event, payload)
 }
 
 // analysisTemplateReplacer 复用桌面端模板占位符的三种写法。
@@ -436,7 +453,7 @@ type portfolioRow struct {
 
 // buildPortfolioPrompt 只统计用户本次勾选、且已配置成本/持仓的股票。
 // 权重按勾选股票的总市值计算，不代表总资产仓位；行情缺失时用自选里上一次价格。
-func buildPortfolioPrompt(currentCode string, currentPrice float64, codes []string) (string, int) {
+func buildPortfolioPrompt(currentCode string, currentPrice float64, codes []string, current data.FollowedStock) (string, int) {
 	if len(codes) == 0 {
 		return "", 0
 	}
@@ -447,6 +464,9 @@ func buildPortfolioPrompt(currentCode string, currentPrice float64, codes []stri
 	byCode := make(map[string]data.FollowedStock, len(*follows))
 	for _, f := range *follows {
 		byCode[normalizeCode(f.StockCode)] = f
+	}
+	if current.StockCode != "" {
+		byCode[currentCode] = current
 	}
 	quotes := quickQuotes(codes)
 

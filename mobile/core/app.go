@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"time"
 
 	"aipanyi/backend/data"
 	"aipanyi/backend/db"
@@ -20,6 +21,8 @@ type mobileApp struct {
 	analysisCancel context.CancelFunc
 	analysisRunID  string
 	analysisCode   string
+	tradeMu        sync.Mutex
+	tradeJobs      map[string]bool
 }
 
 func newMobileApp(ctx context.Context) *mobileApp {
@@ -46,6 +49,91 @@ func (a *mobileApp) RemoveStock(code string) (string, error) {
 
 func (a *mobileApp) SetPosition(code string, costPrice float64, volume int64) (string, error) {
 	return setPosition(code, costPrice, volume)
+}
+
+func (a *mobileApp) StageTradeDraft(draft tradeDraftDTO) error {
+	return saveTradeDraft(draft)
+}
+
+func (a *mobileApp) GetTradeDraft(code string) (*tradeDraftDTO, error) {
+	return getTradeDraft(code)
+}
+
+func (a *mobileApp) AcknowledgeTradeDraft(code, requestID string) error {
+	return acknowledgeTradeDraft(code, requestID)
+}
+
+func (a *mobileApp) GetTradePosition(code string) (tradeResult, error) {
+	position, err := readTradePosition(db.Dao, normalizeCode(code))
+	return position.result(position.BaselineID), err
+}
+
+func (a *mobileApp) PreviewTradeBaseline(in tradeBaselineInput) (tradeResult, error) {
+	entry, err := baselineEntry(in)
+	if err != nil {
+		return tradeResult{}, err
+	}
+	return applyTrade(entry, true)
+}
+
+func (a *mobileApp) SetTradeBaseline(in tradeBaselineInput) (tradeResult, error) {
+	result, err := setTradeBaseline(in)
+	if err == nil {
+		refreshAlertMonitor()
+		a.enqueueTradeStrategy(normalizeCode(in.Code))
+	}
+	return result, err
+}
+
+func (a *mobileApp) PreviewTrade(in tradeInput) (tradeResult, error) {
+	entry, err := fillEntry(in)
+	if err != nil {
+		return tradeResult{}, err
+	}
+	return applyTrade(entry, true)
+}
+
+func (a *mobileApp) RecordTrade(in tradeInput) (tradeResult, error) {
+	result, err := recordTrade(in)
+	if err == nil {
+		refreshAlertMonitor()
+		a.enqueueTradeStrategy(normalizeCode(in.Code))
+	}
+	return result, err
+}
+
+func (a *mobileApp) ListTrades(code string, beforeID int64, limit int) ([]tradeDTO, error) {
+	return listTrades(code, beforeID, limit)
+}
+
+func (a *mobileApp) PreviewTradeCorrection(in tradeCorrection) (tradeResult, error) {
+	entry, err := correctionEntry(in)
+	if err != nil {
+		return tradeResult{}, err
+	}
+	return applyTrade(entry, true)
+}
+
+func (a *mobileApp) CorrectTrade(in tradeCorrection) (tradeResult, error) {
+	result, err := correctTrade(in)
+	if err == nil {
+		refreshAlertMonitor()
+		a.enqueueTradeStrategy(normalizeCode(in.Code))
+	}
+	return result, err
+}
+
+func (a *mobileApp) GetTradeStrategy(code string) (tradeStrategyDTO, error) {
+	norm := normalizeCode(code)
+	out, refresh, err := getTradeStrategy(norm, time.Now())
+	if err == nil && refresh {
+		a.enqueueTradeStrategy(norm)
+	}
+	return out, err
+}
+
+func (a *mobileApp) RefreshTradeStrategy(code string) (tradeStrategyDTO, error) {
+	return refreshTradeStrategy(a.ctx, normalizeCode(code), time.Now(), fetchTradeQuote)
 }
 
 func (a *mobileApp) GetStockDetail(code string) (*stockDetailDTO, error) {
@@ -357,6 +445,10 @@ func (a *mobileApp) DeleteAlert(id int64) (string, error) {
 
 func (a *mobileApp) SetAlertEnabled(id int64, enabled bool) (string, error) {
 	return setAlertEnabled(id, enabled)
+}
+
+func (a *mobileApp) GetAlertContext(code string, id int64) (alertContextDTO, error) {
+	return getAlertContext(code, id)
 }
 
 func (a *mobileApp) ListAlertEvents(limit int) []alertEventDTO {

@@ -3,6 +3,7 @@ import { reactive, watch } from 'vue'
 import { showToast } from 'vant'
 import { api } from '../api'
 import { directionText } from '../format'
+import AlertStrategyFields from './AlertStrategyFields.vue'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -22,7 +23,13 @@ watch(
       ...s,
       selected: !!s.valid,
       price: String(s.price ?? ''),
-      note: s.note || ''
+      note: s.note || '',
+      mode: s.mode || 'strategy',
+      phase: s.phase || 'intraday',
+      minVolumeRatio: s.minVolumeRatio ? String(s.minVolumeRatio) : '',
+      bookPercent: s.minBookBias ? String(s.minBookBias * 100) : '',
+      bookSide: s.bookSide || '',
+      enabled: true
     }))
   }
 )
@@ -46,7 +53,14 @@ async function confirm() {
       direction: item.direction,
       price: Number(item.price) || 0,
       note: item.note,
-      enabled: true,
+      enabled: item.mode === 'price' || item.enabled,
+      mode: item.mode,
+      phase: item.phase,
+      minVolumeRatio: Number(item.minVolumeRatio) || 0,
+      bookSide: item.bookSide,
+      minBookBias: (Number(item.bookPercent) || 0) / 100,
+      usePosition: item.mode === 'strategy' && item.positionRevision != null,
+      positionRevision: item.positionRevision ?? null,
       source: 'ai'
     })))
     let saved = 0
@@ -78,9 +92,9 @@ async function confirm() {
 <template>
   <van-popup :show="show" position="bottom" round :close-on-click-overlay="!state.saving" @update:show="emit('update:show', $event)">
     <div class="sheet">
-      <div class="sheet-title">AI 建议的价格提醒</div>
+      <div class="sheet-title">AI 建议的提醒</div>
       <div class="muted" style="margin-bottom: 12px">
-        只保留分析中明确给出的价格；确认后才会生效。
+        确认每条提醒的方式与条件。收盘规则会保存为待复核。
       </div>
 
       <div v-if="!state.items.length" class="muted" style="padding: 12px 0">
@@ -95,7 +109,7 @@ async function confirm() {
               <b>{{ item.price }}</b>
             </span>
           </van-checkbox>
-          <span class="tag-mini">{{ item.result || (item.valid ? '可添加' : item.reason || '无效') }}</span>
+          <span class="tag-mini">{{ item.result || (item.reason || (item.valid ? '可添加' : '无效')) }}</span>
         </div>
         <van-field
           v-if="item.valid"
@@ -106,6 +120,11 @@ async function confirm() {
           input-align="right"
           style="margin-top: 8px"
         />
+        <fieldset v-if="item.valid && item.selected && !item.done" :disabled="state.saving" class="strategy-fields">
+          <AlertStrategyFields :form="item" />
+          <div v-if="item.mode === 'strategy' && item.positionRevision != null" class="muted">依据分析时的持仓版本</div>
+          <van-checkbox v-if="item.mode === 'strategy' && item.phase === 'intraday'" v-model="item.enabled" :disabled="state.saving">立即启用</van-checkbox>
+        </fieldset>
         <div v-if="item.valid" class="suggestion-note">
           <div class="muted suggestion-note-label">备注</div>
           <van-field
@@ -128,6 +147,7 @@ async function confirm() {
 </template>
 
 <style scoped>
+.strategy-fields { border: 0; margin: 0; padding: 0; min-width: 0; }
 .suggestion-note {
   margin-top: 8px;
 }

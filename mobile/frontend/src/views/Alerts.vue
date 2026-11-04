@@ -3,9 +3,12 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { showConfirmDialog, showToast } from 'vant'
 import { api } from '../api'
 import { onWS } from '../ws'
-import { directionText, fmtPrice, timeShort } from '../format'
+import { alertStatus, directionText, fmtPrice, timeShort } from '../format'
+import { useRouter } from 'vue-router'
 import AlertEdit from '../components/AlertEdit.vue'
 
+const router = useRouter()
+const historyStatus = { confirmed: '仍满足', invalidated: '已失效', waiting: '待复核行情', observing: '待确认', touched: '触价' }
 const tab = ref('rules')
 const alerts = ref([])
 const events = ref([])
@@ -108,7 +111,7 @@ onBeforeUnmount(() => off && off())
             <div>
               <div style="font-weight: 650">
                 {{ a.name || a.code }}
-                <span class="tag-mini" v-if="a.source === 'ai'">AI</span>
+                <span class="tag-mini">{{ alertStatus(a) }}</span>
               </div>
               <div class="small" style="margin-top: 4px">
                 <b>{{ directionText(a.direction) }} {{ fmtPrice(a.price) }}</b>
@@ -121,7 +124,7 @@ onBeforeUnmount(() => off && off())
               </div>
             </div>
             <div class="row" style="gap: 10px">
-              <van-switch :model-value="a.enabled" size="22px" @update:model-value="(v) => toggle(a, v)" />
+              <van-switch :model-value="a.enabled" size="22px" :disabled="a.needsReview" @update:model-value="(v) => toggle(a, v)" />
               <van-icon name="edit" size="19" @click="edit(a)" />
               <van-icon name="delete-o" size="19" color="#e5484d" @click="remove(a)" />
             </div>
@@ -132,6 +135,7 @@ onBeforeUnmount(() => off && off())
       <van-tab title="触发记录" name="history">
         <van-empty v-if="!events.length" description="还没有触发记录" />
         <div v-for="e in events" :key="e.id" class="card">
+          <van-button size="mini" plain @click="router.push({ name: 'stock', params: { code: e.code }, query: { eventId: e.id } })">查看依据</van-button>
           <div class="row">
             <div>
               <div style="font-weight: 600">{{ e.name || e.code }}</div>
@@ -140,6 +144,8 @@ onBeforeUnmount(() => off && off())
             <div style="text-align: right">
               <div class="price-mid">{{ fmtPrice(e.price) }}</div>
               <div class="muted">{{ timeShort(e.triggeredAt) }}</div>
+              <span v-if="e.currentStatus" class="tag-mini">{{ historyStatus[e.currentStatus] }}</span>
+              <div v-if="e.evidence" class="muted">量比 {{ e.evidence.volumeRatio }} · 买卖盘 {{ fmtPrice(e.evidence.bookBias * 100) }}%</div>
             </div>
           </div>
         </div>

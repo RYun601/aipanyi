@@ -5,14 +5,14 @@ package data
 // @Desc
 //-----------------------------------------------------------------------------------
 import (
+	"aipanyi/backend/db"
+	"aipanyi/backend/logger"
+	"aipanyi/backend/models"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"aipanyi/backend/db"
-	"aipanyi/backend/logger"
-	"aipanyi/backend/models"
 	"io"
 	"io/ioutil"
 	url2 "net/url"
@@ -383,6 +383,10 @@ func (receiver StockDataApi) GetStockBaseInfo() {
 }
 
 func (receiver StockDataApi) GetStockCodeRealTimeData(StockCodes ...string) (*[]StockInfo, error) {
+	return receiver.GetStockCodeRealTimeDataContext(context.Background(), StockCodes...)
+}
+
+func (receiver StockDataApi) GetStockCodeRealTimeDataContext(ctx context.Context, StockCodes ...string) (*[]StockInfo, error) {
 	StockCodes = ConvertTushareCodeToStockCodes(StockCodes)
 
 	stockInfos := make([]StockInfo, 0)
@@ -400,7 +404,7 @@ func (receiver StockDataApi) GetStockCodeRealTimeData(StockCodes ...string) (*[]
 			}
 		})
 		url := fmt.Sprintf(txStockUrl, time.Now().Unix(), hkcodesStr)
-		resp, err := receiver.client.R().
+		resp, err := receiver.client.R().SetContext(ctx).
 			SetHeader("Host", "qt.gtimg.cn").
 			SetHeader("Referer", "https://gu.qq.com/").
 			SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0").
@@ -408,7 +412,7 @@ func (receiver StockDataApi) GetStockCodeRealTimeData(StockCodes ...string) (*[]
 		//logger.SugaredLogger.Infof("GetStockCodeRealTimeData %s", url)
 		if err != nil {
 			logger.SugaredLogger.Error(err.Error())
-			return &[]StockInfo{}, err
+			return &stockInfos, err
 		}
 		str := GB18030ToUTF8(resp.Body())
 		dataStr := strutil.SplitAndTrim(strings.Trim(str, "\n"), ";")
@@ -439,6 +443,9 @@ func (receiver StockDataApi) GetStockCodeRealTimeData(StockCodes ...string) (*[]
 		return !strutil.HasPrefixAny(s, []string{"hk", "HK", "sh", "sz"})
 	})
 
+	if len(szzsusCodes) == 0 {
+		return &stockInfos, nil
+	}
 	codes := slice.JoinFunc(szzsusCodes, ",", func(s string) string {
 		if strings.HasPrefix(s, "us") {
 			s = strings.Replace(s, "us", "gb_", 1)
@@ -451,14 +458,14 @@ func (receiver StockDataApi) GetStockCodeRealTimeData(StockCodes ...string) (*[]
 
 	url := fmt.Sprintf(sinaStockUrl, time.Now().Unix(), codes)
 	//logger.SugaredLogger.Infof("GetStockCodeRealTimeData %s", url)
-	resp, err := receiver.client.R().
+	resp, err := receiver.client.R().SetContext(ctx).
 		SetHeader("Host", "hq.sinajs.cn").
 		SetHeader("Referer", "https://finance.sina.com.cn/").
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0").
 		Get(url)
 	if err != nil {
 		logger.SugaredLogger.Error(err.Error())
-		return &[]StockInfo{}, err
+		return &stockInfos, err
 	}
 
 	str := GB18030ToUTF8(resp.Body())
@@ -846,6 +853,11 @@ func ParseTxStockData(data string) (*StockInfo, error) {
 	var err error
 	if strutil.ContainsAny(datas[0], []string{"v_r_hk", "v_hk", "v_sz", "v_sh"}) {
 		result, err = ParseTxHKStockData(datas)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		return nil, nil
 	}
 
 	//logger.SugaredLogger.Infof("股票数据解析完成: %v", result)
@@ -919,7 +931,7 @@ func ParseTxHKStockData(datas []string) (map[string]string, error) {
 	})
 	result["股票代码"] = stockCode
 
-	parts := strutil.SplitAndTrim(datas[1], "~")
+	parts := strings.Split(datas[1], "~")
 	//logger.SugaredLogger.Infof("股票数据解析完成 len: %v", len(parts))
 	if len(parts) < 35 {
 		return nil, fmt.Errorf("invalid data format")
@@ -957,20 +969,12 @@ func ParseTxHKStockData(datas []string) (map[string]string, error) {
 
 	}
 
-	timestr := ""
-
-	if strutil.ContainsAny(parts[30], []string{"/"}) {
-		timestr = strutil.ReplaceWithMap(parts[30], map[string]string{
-			"/":  "-",
-			"\n": " ",
-		})
-		result["日期"] = strutil.SplitAndTrim(timestr, " ", "")[0]
-		result["时间"] = strutil.SplitAndTrim(timestr, " ", "")[1]
+	if fields := strings.Fields(strings.ReplaceAll(parts[30], "/", "-")); len(fields) == 2 {
+		result["日期"], result["时间"] = fields[0], fields[1]
 	} else {
-		result["日期"] = strutil.Trim(parts[29])[0:4] + "-" + strutil.Trim(parts[29])[4:6] + "-" + strutil.Trim(parts[29])[6:8]
-		result["时间"] = strutil.Trim(parts[29])[8:10] + ":" + strutil.Trim(parts[29])[10:12] + ":" + strutil.Trim(parts[29])[12:14]
-		result["今日最高价"] = parts[32]
-		result["今日最低价"] = parts[33]
+		if t, err := time.Parse("20060102150405", strings.TrimSpace(parts[30])); err == nil {
+			result["日期"], result["时间"] = t.Format("2006-01-02"), t.Format("15:04:05")
+		}
 	}
 	//logger.SugaredLogger.Infof("股票数据解析完成 %s %s 时间: %s,%s", parts[1], parts[3], parts[29], parts[30])
 

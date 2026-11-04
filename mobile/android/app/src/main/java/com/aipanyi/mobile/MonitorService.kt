@@ -118,6 +118,8 @@ class MonitorService : Service() {
     }
 
     private fun startFromAlarm(target: Long) {
+        stopRunnable?.let { handler.removeCallbacks(it) }
+        stopRunnable = null
         if (earlyStart != null || waitingForSchedule) return
         waitingForSchedule = true
         val delay = target - System.currentTimeMillis()
@@ -294,6 +296,13 @@ class MonitorService : Service() {
         @Volatile
         var isRunning: Boolean = false
             private set
+
+        fun deliverOpeningAlarm(target: Long): Boolean {
+            val service = instance ?: return false
+            if (service.stopping) return false
+            service.startFromAlarm(target)
+            return true
+        }
 
         fun onWindowEnd() {
             instance?.stopIfIdle("wall_clock_end_alarm")

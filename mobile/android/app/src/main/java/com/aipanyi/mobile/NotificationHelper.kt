@@ -68,11 +68,16 @@ object NotificationHelper {
     }
 
     fun notifyPriceAlert(ctx: Context, title: String, body: String, payload: String) {
-        if (!notificationsEnabled(ctx)) return
+        val eventId = payload.substringAfter('|', "").toLongOrNull() ?: 0L
+        if (!notificationsEnabled(ctx)) {
+            RuntimeLog.info("NotificationHelper", "alert event=$eventId result=permission_disabled")
+            return
+        }
         ensureChannels(ctx)
         val intent = Intent(ctx, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("stock_code", payload)
+            putExtra("stock_code", payload.substringBefore('|'))
+            putExtra("alert_event_id", eventId)
         }
         val pi = PendingIntent.getActivity(
             ctx, payload.hashCode(), intent,
@@ -89,7 +94,13 @@ object NotificationHelper {
             .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setContentIntent(pi)
             .build()
-        NotificationManagerCompat.from(ctx).notify((System.currentTimeMillis() and 0xFFFFFF).toInt(), n)
+        try {
+            val id = if (eventId > 0) -eventId.hashCode() else (System.currentTimeMillis() and 0xFFFFFF).toInt()
+            NotificationManagerCompat.from(ctx).notify(id, n)
+            RuntimeLog.info("NotificationHelper", "alert event=$eventId result=submitted")
+        } catch (e: Exception) {
+            RuntimeLog.error("NotificationHelper", "alert event=$eventId result=failed", e)
+        }
     }
 
     fun notificationsEnabled(ctx: Context): Boolean {

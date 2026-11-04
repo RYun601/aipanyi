@@ -92,22 +92,24 @@ func Start(dataDir string, n Notifier) (string, error) {
 	setNotifier(n)
 	go marketcal.PreCache(3)
 
-	app := newMobileApp(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	app := newMobileApp(ctx)
 	srv, err := webserver.New(app, webui.FS, webserver.Options{
 		Port:        -1, // 随机可用端口，避免与其它应用冲突
 		OpenBrowser: false,
 		Logger:      log.New(os.Stdout, "[aipanyi-mobile] ", log.LstdFlags),
 	})
 	if err != nil {
+		cancel()
 		return "", fmt.Errorf("启动本地服务失败: %w", err)
 	}
 	server = srv
 	baseURL = srv.URL()
 
-	ctx, cancel := context.WithCancel(context.Background())
 	engineCancel = cancel
 	engine = newAlertEngine()
 	go engine.run(ctx)
+	go app.resumeTradeStrategies()
 
 	started = true
 	scheduleMonitorRefresh()
@@ -152,7 +154,14 @@ func migrateMobile() error {
 		&priceAlert{},
 		&priceAlertEvent{},
 		&mobileSettings{},
+		&tradeEntry{},
+		&tradeDraft{},
+		&tradePosition{},
+		&analysisAlertBasis{},
 	); err != nil {
+		return err
+	}
+	if err := migrateAlertModes(); err != nil {
 		return err
 	}
 	if err := backfillAlertMarkets(); err != nil {

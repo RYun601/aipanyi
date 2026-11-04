@@ -16,10 +16,17 @@ object CoreUrl {
     fun shouldReload(currentUrl: String?, newUrl: String, failed: Boolean = false): Boolean =
         failed || origin(currentUrl) == null || origin(currentUrl) != origin(newUrl)
 
-    fun reloadUrl(newUrl: String, currentUrl: String?): String {
+    fun reloadUrl(newUrl: String, currentUrl: String?, pendingRoute: String? = null): String {
         val base = newUrl.trimEnd('/')
-        val route = currentUrl?.substringAfter('#', "")
+        val route = pendingRoute ?: currentUrl?.substringAfter('#', "")
         return if (route.isNullOrBlank()) "$base/" else "$base/#$route"
+    }
+
+    fun matchesNavigation(expected: String?, finished: String?): Boolean {
+        if (expected == null || finished == null || origin(expected) == null || origin(expected) != origin(finished)) return false
+        if (expected.substringBefore('#') != finished.substringBefore('#')) return false
+        val route = expected.substringAfter('#', "")
+        return route.isEmpty() || route == finished.substringAfter('#', "")
     }
 
     fun healthy(url: String): Boolean {

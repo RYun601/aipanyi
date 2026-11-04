@@ -117,11 +117,11 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
-                if (matchesLoading(url) && !navigationFailed) completeNavigation(url!!)
+                if (!navigationFailed && CoreUrl.matchesNavigation(loadingUrl, url)) completeNavigation(url!!)
             }
 
             override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
-                if (!navigationFailed && loadingUrl == null && CoreUrl.origin(url) == CoreUrl.origin(lastGoodUrl)) {
+                if (!navigationFailed && loadingUrl == null && CoreUrl.origin(url)?.let { it == CoreUrl.origin(lastGoodUrl) } == true) {
                     lastGoodUrl = url
                 }
                 // 同一文档的 hash 导航有时不会收到 onPageFinished。
@@ -214,10 +214,11 @@ class MainActivity : AppCompatActivity() {
             requestId = null
             return
         }
-        val target = if (code == null) CoreUrl.reloadUrl(origin, lastGoodUrl) else {
-            val event = eventId?.let { "?eventId=$it" } ?: ""
-            "$origin/#/stock/${Uri.encode(code)}$event"
+        val route = code?.let {
+            val event = eventId?.let { id -> "?eventId=$id" } ?: ""
+            "/stock/${Uri.encode(it)}$event"
         }
+        val target = CoreUrl.reloadUrl(origin, lastGoodUrl, route)
         if (loadingUrl == target) return
         val forceReload = navigationFailed && CoreUrl.origin(lastGoodUrl) == origin
         loadingStockCode = code

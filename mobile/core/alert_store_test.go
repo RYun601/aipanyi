@@ -78,3 +78,31 @@ func TestAlertEnableLimitConcurrent(t *testing.T) {
 		t.Fatalf("successful enables = %d, enabled = %d", succeeded, lenAlertsEnabled())
 	}
 }
+
+func TestAlertModeMigrationKeepsExistingHistory(t *testing.T) {
+	setupAlertTestDB(t)
+	legacy := priceAlert{StockCode: "sh600000", Source: "ai", Price: 9.05, Note: "收盘站稳", Enabled: true, TriggerCount: 2}
+	if err := db.Dao.Create(&legacy).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Dao.Create(&priceAlertEvent{AlertID: legacy.ID, StockCode: legacy.StockCode, Price: 9.06}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := migrateAlertModes(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var stored priceAlert
+	if err := db.Dao.First(&stored, legacy.ID).Error; err != nil || stored.Enabled || !stored.NeedsReview ||
+		stored.Mode != "strategy" || stored.TriggerCount != 2 || stored.Note != legacy.Note {
+		t.Fatalf("legacy AI rule: %+v, %v", stored, err)
+	}
+	var count int64
+	if err := db.Dao.Model(&priceAlertEvent{}).Where("alert_id = ?", legacy.ID).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("history count = %d, %v", count, err)
+	}
+	if lenAlertsEnabled() != 49 {
+		t.Fatalf("enabled manual rules = %d", lenAlertsEnabled())
+	}
+}

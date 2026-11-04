@@ -6,8 +6,10 @@ import (
 	"strings"
 
 	"aipanyi/backend/data"
+	"aipanyi/backend/db"
 	"aipanyi/backend/logger"
 	"aipanyi/mobile/alerts"
+	"gorm.io/gorm"
 )
 
 const extractSystemPrompt = `你是一个交易策略结构化助手。你的任务是从一段股票分析中提取“价格提醒”条件。
@@ -49,7 +51,16 @@ func extractAlerts(code string) ([]alertSuggestionDTO, error) {
 	if !ok {
 		return nil, errors.New("AI 配置不存在")
 	}
-	return extractAlertsWithConfig(norm, analysis.Name, analysis.Content, mustPrice(norm), cfg)
+	var basis analysisAlertBasis
+	err := db.Dao.First(&basis, "chat_id = ?", analysis.ChatID).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, errors.New("无法读取分析的持仓版本，请重试")
+	}
+	suggestions, err := extractAlertsWithConfig(norm, analysis.Name, analysis.Content, mustPrice(norm), cfg)
+	if err == nil && basis.ChatID != "" {
+		assignSuggestionBasis(suggestions, &basis.PositionRevision)
+	}
+	return suggestions, err
 }
 
 func extractAlertsWithConfig(code, name, analysis string, currentPrice float64, cfg data.AIConfig) ([]alertSuggestionDTO, error) {
@@ -66,12 +77,13 @@ func extractAlertsWithConfig(code, name, analysis string, currentPrice float64, 
 		"当前价：" + fmtPriceOrUnknown(currentPrice) + "\n" +
 		"分析内容：\n<analysis>\n" + analysis + "\n</analysis>\n\n" +
 		"请提取所有明确的价格提醒。输出格式：\n" +
-		`{"alerts":[{"direction":"above|below","price":123.45,"note":"简短说明"}]}` + "\n" +
+		`{"alerts":[{"direction":"above|below","price":123.45,"note":"简短说明","phase":"intraday|close","minVolumeRatio":null,"bookSide":"","minBookBias":null}]}` + "\n" +
 		"规则：\n" +
 		"1. 只提取分析中明确给出的价格，不要自己推测。\n" +
 		"2. direction=above 表示价格涨到/突破该价；below 表示跌到/跌破该价。\n" +
 		"3. price 必须是数字，A 股保留两位小数。\n" +
-		"4. 没有明确价格时输出 {\"alerts\":[]}。"
+		"4. 保留收盘、放量、站稳等限定，收盘用 phase=close。只填写原文明示的量比、五档买卖盘方向（buy/sell）及偏向阈值（0 到 1）。缺失填 null 或空字符串。\n" +
+		"5. 没有明确价格时输出 {\"alerts\":[]}。"
 
 	// 0 表示按模型预算解析，不能用 600 这类小额度：思考模型的 reasoning
 	// 会先耗尽额度，导致正文 JSON 为空。
@@ -99,9 +111,16 @@ func parseAlertSuggestions(content, code, name string, currentPrice float64) ([]
 			Note:      s.Note,
 			Valid:     s.Valid,
 			Reason:    s.Reason,
+			Mode:      s.Mode, Phase: s.Phase, MinVolumeRatio: s.MinVolumeRatio, BookSide: s.BookSide, MinBookBias: s.MinBookBias,
 		})
 	}
 	return out, nil
+}
+
+func assignSuggestionBasis(suggestions []alertSuggestionDTO, revision *int64) {
+	for i := range suggestions {
+		suggestions[i].PositionRevision = revision
+	}
 }
 
 func fmtPriceOrUnknown(v float64) string {

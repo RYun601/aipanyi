@@ -1,16 +1,45 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { showConfirmDialog, showToast } from 'vant'
-import { api } from '../api'
+import { api, submitTradeDraft } from '../api'
 import { onWS } from '../ws'
-import { changeClass, directionText, fmtPercent, fmtPrice, fmtSignedMoney, timeShort } from '../format'
+import { alertStatus, changeClass, directionText, fmtPercent, fmtPrice, fmtSignedMoney, timeShort } from '../format'
 import MarkdownView from '../components/MarkdownView.vue'
 import AlertEdit from '../components/AlertEdit.vue'
 import AlertSuggestions from '../components/AlertSuggestions.vue'
+import TradeFillEdit from '../components/TradeFillEdit.vue'
+import TradeHistory from '../components/TradeHistory.vue'
 
 const props = defineProps({ code: { type: String, required: true } })
 const router = useRouter()
+const route = useRoute()
+const alertContext = ref(null)
+const alertEventId = computed(() => Number(route.query.eventId) || 0)
+const contextText = { confirmed: "条件仍满足", invalidated: "条件已失效", observing: "等待指标确认", waiting: "等待新鲜行情", touched: "历史触价", batch: "同批策略" }
+
+const pendingTrade = ref(null)
+const restoringTrade = ref(false)
+const tradeStrategy = ref(null)
+const tradePosition = computed(() => tradeStrategy.value?.position?.revision ? tradeStrategy.value.position : null)
+const showTrade = ref(false)
+const showTradeHistory = ref(false)
+const editTrade = ref(null)
+const editBaseline = ref(false)
+const tradeRefreshing = ref(false)
+const strategyText = {
+  pending: '正在重算',
+  quote_pending: '行情待更新',
+  rules_pending: '待设定策略条件',
+  closed: '已清仓',
+  observing: '继续观察',
+  waiting_rebuy: '等待回补条件',
+  conditions_met: '已有规则条件仍满足',
+  outside_session: '等待交易时段'
+}
+let tradeLoadId = 0
+let offTrade = null
+let openFillAfterBaseline = false
 
 const detail = ref(null)
 const loading = ref(true)
@@ -68,6 +97,21 @@ const allSelected = computed({
   }
 })
 
+async function loadAlertContext() {
+  const code = props.code
+  const id = alertEventId.value
+  alertContext.value = null
+  if (!id) return
+  try {
+    const result = await api.getAlertContext(code, id)
+    if (code === props.code && id === alertEventId.value) alertContext.value = result
+  } catch (e) {
+    if (code === props.code && id === alertEventId.value) showToast(e?.message || '读取提醒失败')
+  }
+}
+
+watch([() => props.code, alertEventId], loadAlertContext, { immediate: true })
+
 async function load() {
   loading.value = true
   try {
@@ -80,6 +124,86 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+async function loadTradeDraft() {
+  const code = props.code
+  try {
+    const draft = await api.getTradeDraft(code)
+    if (code === props.code) pendingTrade.value = draft
+  } catch {
+    // Confirmation always checks the persistent draft before sending a new write.
+  }
+}
+
+async function restoreTradeDraft() {
+  if (restoringTrade.value || !pendingTrade.value) return
+  restoringTrade.value = true
+  try {
+    const result = await submitTradeDraft(pendingTrade.value)
+    showToast('已核对并恢复上次提交')
+    await onTradeSaved(result)
+  } catch (error) {
+    showToast(error.message || '恢复提交失败')
+    await loadTradeDraft()
+  } finally {
+    restoringTrade.value = false
+  }
+}
+
+async function loadTradeStrategy(force = false) {
+  const code = props.code
+  const request = ++tradeLoadId
+  if (force) tradeRefreshing.value = true
+  try {
+    const result = await (force ? api.refreshTradeStrategy(code) : api.getTradeStrategy(code))
+    if (code === props.code && request === tradeLoadId) tradeStrategy.value = result
+  } catch (e) {
+    if (force) showToast(e?.message || '刷新策略失败')
+  } finally {
+    if (force) tradeRefreshing.value = false
+  }
+}
+
+function openFill() {
+  editTrade.value = null
+  editBaseline.value = !tradePosition.value
+  openFillAfterBaseline = editBaseline.value
+  showTrade.value = true
+}
+
+function openBaseline() {
+  editTrade.value = null
+  editBaseline.value = true
+  openFillAfterBaseline = false
+  showTrade.value = true
+}
+
+function openTradeCorrection(fill) {
+  showTradeHistory.value = false
+  editTrade.value = fill
+  editBaseline.value = false
+  openFillAfterBaseline = false
+  showTrade.value = true
+}
+
+async function onTradeSaved(receipt) {
+  const code = props.code
+  const afterBaseline = openFillAfterBaseline && editBaseline.value
+  openFillAfterBaseline = false
+  await Promise.all([loadTradeStrategy(), loadTradeDraft()])
+  if (code !== props.code) return
+  const current = tradePosition.value || receipt
+  if (detail.value?.item) {
+    detail.value.item.costPrice = Number(current.averageCost)
+    detail.value.item.volume = current.quantity
+  }
+  if (afterBaseline) {
+    editBaseline.value = false
+    editTrade.value = null
+    showTrade.value = true
+  }
+  load()
 }
 
 function stopStatusPolling() {
@@ -268,6 +392,10 @@ async function cancelAnalysis() {
 }
 
 function openPosition() {
+  if (tradePosition.value) {
+    openBaseline()
+    return
+  }
   const it = item.value
   cost.value = it.costPrice ? String(it.costPrice) : ''
   volume.value = it.volume ? String(it.volume) : ''
@@ -347,6 +475,11 @@ async function extractAlerts() {
 }
 
 onMounted(() => {
+  offTrade = onWS('mobileTradeStrategy', (message) => {
+    if (message?.code === currentCode.value) loadTradeStrategy()
+  })
+  loadTradeStrategy()
+  loadTradeDraft()
   load()
   syncAnalysisStatus()
   offAnalysis = onWS('mobileAnalysis', onAnalysis)
@@ -365,6 +498,8 @@ onBeforeUnmount(() => {
   stopStatusPolling()
   offAnalysis && offAnalysis()
   offSuggestions && offSuggestions()
+  offTrade && offTrade()
+  tradeLoadId++
 })
 
 watch(
@@ -378,6 +513,13 @@ watch(
     withPosition.value = false
     positionOptions.value = []
     loadingPositions.value = false
+    tradeStrategy.value = null
+    pendingTrade.value = null
+    showTrade.value = false
+    showTradeHistory.value = false
+    openFillAfterBaseline = false
+    loadTradeStrategy()
+    loadTradeDraft()
     load()
     syncAnalysisStatus()
   }
@@ -398,6 +540,14 @@ watch(
       <van-loading v-if="loading && !detail" style="padding: 80px 0" vertical>加载中</van-loading>
 
       <template v-else>
+        <div v-if="alertContext" class="card">
+          <div class="row"><b>提醒依据</b><span class="tag-mini">{{ contextText[alertContext.status] }}</span></div>
+          <div v-for="e in alertContext.events" :key="e.id" class="small" style="margin-top: 6px">
+            {{ timeShort(e.triggeredAt) }} · {{ directionText(e.direction) }} {{ fmtPrice(e.threshold) }}
+            <span class="tag-mini">{{ contextText[e.currentStatus] }}</span>
+            <span v-if="e.evidence"> · 量比 {{ e.evidence.volumeRatio }} · 买卖盘 {{ fmtPercent(e.evidence.bookBias * 100) }}</span>
+          </div>
+        </div>
         <div class="card">
           <div class="row">
             <div>
@@ -417,11 +567,41 @@ watch(
                 {{ fmtSignedMoney(item.profitAmount) }} ({{ fmtPercent(item.profitPercent) }})
               </div>
               <van-button size="small" plain type="primary" style="margin-top: 6px" @click="openPosition">
-                设置成本
+                {{ tradePosition ? "对账期初" : "设置成本" }}
               </van-button>
             </div>
           </div>
           <div v-if="item.quoteTime" class="muted" style="margin-top: 8px">行情时间 {{ item.quoteTime }}</div>
+        </div>
+
+        <div v-if="item.followed || tradePosition" class="card">
+          <div class="row">
+            <b>今日策略</b>
+            <van-button v-if="tradePosition && item.followed" size="small" plain :loading="tradeRefreshing" @click="loadTradeStrategy(true)">刷新策略</van-button>
+          </div>
+          <template v-if="tradePosition">
+            <div class="muted" style="margin: 6px 0">
+              {{ tradeStrategy.tradingDate }} · {{ strategyText[tradeStrategy.status] }}
+              <span v-if="tradeStrategy.quoteAt"> · 行情 {{ new Date(tradeStrategy.quoteAt).toLocaleTimeString() }}</span>
+            </div>
+            <div class="small">剩余 {{ tradePosition.quantity }} 股 · 均价 {{ tradePosition.averageCost }} · 每股净投入 {{ tradePosition.netCost }}</div>
+            <div class="small">本轮净投入 {{ tradePosition.netInvested }} · 本段已实现 {{ tradePosition.realized }}</div>
+            <template v-if="tradeStrategy.bought">
+              <div class="small">今日买入 {{ tradeStrategy.bought.quantity }} 股，均价 {{ tradeStrategy.bought.averagePrice }}，净支出 {{ tradeStrategy.bought.netAmount }}</div>
+              <div class="small">今日卖出 {{ tradeStrategy.sold.quantity }} 股，均价 {{ tradeStrategy.sold.averagePrice }}，净回款 {{ tradeStrategy.sold.netAmount }}</div>
+              <div class="small">今日已实现 {{ tradeStrategy.todayRealized }} · 本轮回补 {{ tradeStrategy.matchedShares }} 股 · 未配对 {{ tradeStrategy.unmatchedShares }} 股</div>
+              <div v-if="tradeStrategy.matchedShares" class="small">已回补净差额（含费用） {{ tradeStrategy.matchedSavings }}</div>
+            </template>
+          </template>
+          <div v-else class="muted" style="margin: 6px 0">核对期初后，可以记录实际成交并更新策略。</div>
+          <div v-if="pendingTrade" class="small" style="margin-top: 8px">
+            有一笔提交待核对
+            <van-button size="small" plain :loading="restoringTrade" @click="restoreTradeDraft">恢复上次提交</van-button>
+          </div>
+          <div class="row" style="margin-top: 8px">
+            <van-button v-if="item.followed" :disabled="!!pendingTrade" size="small" type="primary" plain @click="openFill">记录成交</van-button>
+            <van-button size="small" plain @click="showTradeHistory = true">{{ tradeStrategy?.tradeIds?.length ? '成交记录及策略依据' : '成交记录' }}</van-button>
+          </div>
         </div>
 
         <div class="card">
@@ -546,7 +726,8 @@ watch(
                 </div>
               </div>
               <div class="row" style="gap: 8px">
-                <van-switch :model-value="a.enabled" size="20px" @update:model-value="(v) => toggleAlert(a, v)" />
+                <span class="tag-mini">{{ alertStatus(a) }}</span>
+                <van-switch :model-value="a.enabled" size="20px" :disabled="a.needsReview" @update:model-value="(v) => toggleAlert(a, v)" />
                 <van-icon name="edit" size="18" @click="openEditAlert(a)" />
                 <van-icon name="delete-o" size="18" color="#e5484d" @click="removeAlert(a)" />
               </div>
@@ -698,10 +879,32 @@ watch(
       </div>
     </van-popup>
 
+    <TradeFillEdit
+      :key="code"
+      v-model:show="showTrade"
+      :code="code"
+      :baseline="editBaseline"
+      :fill="editTrade"
+      :alert-event-id="alertContext ? alertEventId : 0"
+      :legacy-cost="item.costPrice || 0"
+      :legacy-volume="item.volume || 0"
+      :position="tradePosition"
+      @saved="onTradeSaved"
+    />
+    <TradeHistory
+      :key="'history-' + code"
+      v-model:show="showTradeHistory"
+      :code="code"
+      :revision="tradePosition?.revision || 0"
+      :highlights="tradeStrategy?.tradeIds || []"
+      @edit="openTradeCorrection"
+      @saved="onTradeSaved"
+    />
     <AlertEdit
       v-model:show="showAlertEdit"
       :stock="{ code: item.code || code, name: item.name || '' }"
       :alert="editingAlert"
+      :has-ledger="!!tradePosition"
       @saved="load"
     />
 
