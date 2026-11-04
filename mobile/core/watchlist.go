@@ -1,13 +1,17 @@
 package mobilecore
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"aipanyi/backend/data"
 	"aipanyi/backend/db"
+	"gorm.io/gorm"
 )
 
 func normalizeCode(code string) string {
@@ -29,7 +33,7 @@ func marketOf(code string) string {
 
 func parsePrice(s string) float64 {
 	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
-	if err != nil {
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
 		return 0
 	}
 	return v
@@ -49,11 +53,15 @@ func quoteTime(q data.StockInfo) string {
 }
 
 func getQuotes(codes []string) (map[string]data.StockInfo, error) {
+	return getQuotesContext(context.Background(), codes)
+}
+
+func getQuotesContext(ctx context.Context, codes []string) (map[string]data.StockInfo, error) {
 	out := make(map[string]data.StockInfo, len(codes))
 	if len(codes) == 0 {
 		return out, nil
 	}
-	res, err := data.NewStockDataApi().GetStockCodeRealTimeData(codes...)
+	res, err := data.NewStockDataApi().GetStockCodeRealTimeDataContext(ctx, codes...)
 	if res != nil {
 		for _, q := range *res {
 			out[normalizeCode(q.Code)] = q
@@ -164,6 +172,13 @@ func addStock(code string) (string, error) {
 	if norm == "" {
 		return "", errors.New("股票代码为空")
 	}
+	restored, err := restoreFollowedPosition(norm)
+	if err != nil {
+		return "", err
+	}
+	if restored {
+		return "关注成功", nil
+	}
 	msg := data.NewStockDataApi().Follow(norm)
 	if msg == "关注失败" {
 		return "", errors.New("关注失败：获取行情失败或代码不支持")
@@ -176,12 +191,46 @@ func removeStock(code string) (string, error) {
 	if norm == "" {
 		return "", errors.New("股票代码为空")
 	}
-	msg := data.NewStockDataApi().UnFollow(norm)
-	// 取消关注后同步关闭该股票的提醒，避免继续为不在自选里的股票发通知。
-	_ = db.Dao.Model(&priceAlert{}).Where("stock_code = ?", norm).Update("enabled", false).Error
-	updateMonitorStatus(lenAlertsEnabled())
-	scheduleMonitorRefresh()
-	return msg, nil
+	portfolioWriteMu.Lock()
+	err := db.Dao.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("stock_code = ?", norm).Delete(&data.FollowedStock{}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&priceAlert{}).Where("stock_code = ?", norm).
+			Updates(map[string]any{"enabled": false, "revision": gorm.Expr("revision + 1")}).Error
+	})
+	portfolioWriteMu.Unlock()
+	if err != nil {
+		return "", err
+	}
+	refreshAlertMonitor()
+	return "取消关注成功", nil
+}
+
+func restoreFollowedPosition(code string) (bool, error) {
+	portfolioWriteMu.Lock()
+	defer portfolioWriteMu.Unlock()
+	restored := false
+	err := db.Dao.Transaction(func(tx *gorm.DB) error {
+		position, err := readTradePosition(tx, code)
+		if err != nil || position.Revision == 0 {
+			return err
+		}
+		var followed data.FollowedStock
+		if err := tx.Unscoped().Where("stock_code = ?", code).Order("is_del ASC").First(&followed).Error; err != nil {
+			return err
+		}
+		if followed.IsDel != 0 {
+			row := tx.Unscoped().Model(&data.FollowedStock{}).Where("rowid = (?)",
+				tx.Unscoped().Table("followed_stock").Select("MIN(rowid)").Where("stock_code = ? AND is_del <> 0", code))
+			if err := row.Update("is_del", 0).Error; err != nil {
+				return err
+			}
+		}
+		restored = true
+		return writeFollowedPosition(tx, position)
+	})
+	return restored, err
 }
 
 func setPosition(code string, costPrice float64, volume int64) (string, error) {
@@ -189,18 +238,30 @@ func setPosition(code string, costPrice float64, volume int64) (string, error) {
 	if norm == "" {
 		return "", errors.New("股票代码为空")
 	}
-	if costPrice < 0 || volume < 0 {
-		return "", errors.New("成本价和持仓数量不能为负数")
+	if costPrice < 0 || math.IsNaN(costPrice) || math.IsInf(costPrice, 0) || volume < 0 {
+		return "", errors.New("成本价和持仓数量须为非负数字")
 	}
-	f := data.NewStockDataApi().GetFollowedStockByStockCode(norm)
-	if f.StockCode == "" {
-		return "", errors.New("请先关注该股票")
+	portfolioWriteMu.Lock()
+	defer portfolioWriteMu.Unlock()
+	err := db.Dao.Transaction(func(tx *gorm.DB) error {
+		position, err := readTradePosition(tx, norm)
+		if err != nil {
+			return err
+		}
+		if position.Revision != 0 {
+			return errors.New("该股票已启用成交账本，请更正成交或新增对账期初")
+		}
+		result := tx.Model(&data.FollowedStock{}).Where("stock_code = ?", norm).
+			Updates(map[string]any{"cost_price": costPrice, "volume": volume})
+		if result.Error == nil && result.RowsAffected == 0 {
+			return errAlertNotFollowed
+		}
+		return result.Error
+	})
+	if err != nil {
+		return "", err
 	}
-	msg := data.NewStockDataApi().SetCostPriceAndVolume(costPrice, volume, norm)
-	if strings.HasPrefix(msg, "设置失败") {
-		return "", errors.New(msg)
-	}
-	return msg, nil
+	return "设置成功", nil
 }
 
 func stockDetail(code string) (*stockDetailDTO, error) {
@@ -209,7 +270,9 @@ func stockDetail(code string) (*stockDetailDTO, error) {
 		return nil, errors.New("股票代码为空")
 	}
 	f := data.NewStockDataApi().GetFollowedStockByStockCode(norm)
-	quotes, _ := getQuotes([]string{norm})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	quotes, _ := getQuotesContext(ctx, []string{norm})
 	q, hasQuote := quotes[norm]
 	item := buildWatchItem(f, q, hasQuote)
 	item.Code = norm

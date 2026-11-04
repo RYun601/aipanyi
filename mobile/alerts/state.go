@@ -14,13 +14,18 @@ import (
 
 // Suggestion 是 AI 分析提取出的一条建议（已做基础校验）。
 type Suggestion struct {
-	Code      string
-	Name      string
-	Direction string
-	Price     float64
-	Note      string
-	Valid     bool
-	Reason    string
+	Code           string
+	Name           string
+	Direction      string
+	Price          float64
+	Note           string
+	Valid          bool
+	Reason         string
+	Mode           string
+	Phase          string
+	MinVolumeRatio float64
+	BookSide       string
+	MinBookBias    float64
 }
 
 // NormalizeDirection 把模型可能返回的中英文方向归一化为 above/below。
@@ -104,9 +109,13 @@ func ParseSuggestions(content, code, name string, currentPrice float64) ([]Sugge
 	payload := StripJSONFence(content)
 	var env struct {
 		Alerts []struct {
-			Direction any    `json:"direction"`
-			Price     any    `json:"price"`
-			Note      string `json:"note"`
+			Direction      any    `json:"direction"`
+			Price          any    `json:"price"`
+			Note           string `json:"note"`
+			Phase          string `json:"phase"`
+			MinVolumeRatio any    `json:"minVolumeRatio"`
+			BookSide       string `json:"bookSide"`
+			MinBookBias    any    `json:"minBookBias"`
 		} `json:"alerts"`
 	}
 	if err := json.Unmarshal([]byte(payload), &env); err != nil {
@@ -121,7 +130,7 @@ func ParseSuggestions(content, code, name string, currentPrice float64) ([]Sugge
 		switch {
 		case dir == "":
 			sug.Reason = "方向不明确"
-		case !priceOK || price <= 0:
+		case !priceOK || !positive(price):
 			sug.Reason = "价格无效"
 		case currentPrice > 0 && (price < currentPrice*0.5 || price > currentPrice*2):
 			sug.Reason = "价格偏离现价过大"
@@ -129,13 +138,36 @@ func ParseSuggestions(content, code, name string, currentPrice float64) ([]Sugge
 			sug.Valid = true
 		}
 		sug.Direction = dir
-		sug.Price = math.Round(price*100) / 100
+		if positive(price) && price <= math.MaxFloat64/100 {
+			sug.Price = math.Round(price*100) / 100
+		}
 		sug.Note = strings.TrimSpace(raw.Note)
 		if len([]rune(sug.Note)) > 100 {
 			sug.Note = string([]rune(sug.Note)[:100])
 		}
 		if sug.Note == "" {
 			sug.Note = "AI 建议"
+		}
+		sug.Mode, sug.Phase = "strategy", "intraday"
+		if raw.Phase == "close" || strings.Contains(sug.Note, "收盘") {
+			sug.Phase = "close"
+			if sug.Valid {
+				sug.Reason = "收盘条件待人工确认"
+			}
+		}
+		sug.MinVolumeRatio, _ = ToFloat(raw.MinVolumeRatio)
+		sug.MinBookBias, _ = ToFloat(raw.MinBookBias)
+		sug.BookSide = raw.BookSide
+		rule := StrategyRule{Direction: dir, Price: sug.Price, MinVolumeRatio: sug.MinVolumeRatio,
+			BookSide: sug.BookSide, MinBookBias: sug.MinBookBias}
+		if sug.Valid && sug.Phase == "intraday" && !rule.Valid() {
+			sug.Reason = "请补充量比和买卖盘条件"
+		}
+		if math.IsNaN(sug.MinVolumeRatio) || math.IsInf(sug.MinVolumeRatio, 0) {
+			sug.MinVolumeRatio = 0
+		}
+		if math.IsNaN(sug.MinBookBias) || math.IsInf(sug.MinBookBias, 0) {
+			sug.MinBookBias = 0
 		}
 		if sug.Valid {
 			key := fmt.Sprintf("%s:%.2f", sug.Direction, sug.Price)

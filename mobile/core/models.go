@@ -9,37 +9,58 @@ import "time"
 // ---------------- 表模型（内部使用） ----------------
 
 type priceAlert struct {
-	ID              uint `gorm:"primarykey"`
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	StockCode       string     `gorm:"size:20;index" json:"stockCode"`
-	StockName       string     `gorm:"size:50" json:"stockName"`
-	Market          string     `gorm:"size:10" json:"market"`
-	Direction       string     `gorm:"size:10" json:"direction"`
-	Price           float64    `json:"price"`
-	Note            string     `gorm:"size:200" json:"note"`
-	Source          string     `gorm:"size:10" json:"source"`
-	Enabled         bool       `gorm:"index" json:"enabled"`
-	LastState       string     `gorm:"size:10;default:unknown" json:"lastState"`
-	LastTriggeredAt *time.Time `json:"lastTriggeredAt"`
-	TriggerCount    int        `gorm:"default:0" json:"triggerCount"`
+	ID               uint `gorm:"primarykey"`
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	StockCode        string  `gorm:"size:20;index" json:"stockCode"`
+	StockName        string  `gorm:"size:50" json:"stockName"`
+	Market           string  `gorm:"size:10" json:"market"`
+	Direction        string  `gorm:"size:10" json:"direction"`
+	Price            float64 `json:"price"`
+	Note             string  `gorm:"size:200" json:"note"`
+	Source           string  `gorm:"size:10" json:"source"`
+	Enabled          bool    `gorm:"index" json:"enabled"`
+	Mode             string
+	Phase            string
+	MinVolumeRatio   float64
+	BookSide         string
+	MinBookBias      float64
+	NeedsReview      bool
+	Revision         int64 `gorm:"not null;default:1"`
+	PositionRevision *int64
+	StrategyState    string
+	InitialNotify    bool
+	LastState        string     `gorm:"size:10;default:unknown" json:"lastState"`
+	LastTriggeredAt  *time.Time `json:"lastTriggeredAt"`
+	TriggerCount     int        `gorm:"default:0" json:"triggerCount"`
 }
 
 func (priceAlert) TableName() string { return "mobile_price_alert" }
 
 type priceAlertEvent struct {
-	ID          uint `gorm:"primarykey"`
-	CreatedAt   time.Time
-	AlertID     uint      `gorm:"index" json:"alertId"`
-	StockCode   string    `gorm:"size:20;index" json:"stockCode"`
-	StockName   string    `gorm:"size:50" json:"stockName"`
-	Price       float64   `json:"price"`
-	Threshold   float64   `json:"threshold"`
-	Direction   string    `gorm:"size:10" json:"direction"`
-	TriggeredAt time.Time `gorm:"index" json:"triggeredAt"`
+	ID           uint `gorm:"primarykey"`
+	CreatedAt    time.Time
+	AlertID      uint    `gorm:"index" json:"alertId"`
+	StockCode    string  `gorm:"size:20;index" json:"stockCode"`
+	StockName    string  `gorm:"size:50" json:"stockName"`
+	Price        float64 `json:"price"`
+	Threshold    float64 `json:"threshold"`
+	Direction    string  `gorm:"size:10" json:"direction"`
+	Mode         string
+	Batch        string `gorm:"index"`
+	RuleRevision int64
+	Evidence     string
+	TriggeredAt  time.Time `gorm:"index" json:"triggeredAt"`
 }
 
 func (priceAlertEvent) TableName() string { return "mobile_price_alert_event" }
+
+type analysisAlertBasis struct {
+	ChatID           string `gorm:"primaryKey"`
+	PositionRevision int64
+}
+
+func (analysisAlertBasis) TableName() string { return "mobile_analysis_alert_basis" }
 
 type mobileSettings struct {
 	ID                uint `gorm:"primarykey"`
@@ -50,6 +71,8 @@ type mobileSettings struct {
 	EnableTools       bool
 	Thinking          bool
 	PushEnabled       bool
+	TradeFeeRate      string `gorm:"not null;default:''"`
+	TradeFeeRulesJSON string `gorm:"not null;default:''"`
 }
 
 func (mobileSettings) TableName() string { return "mobile_settings" }
@@ -79,41 +102,67 @@ type stockBasicDTO struct {
 	Market string `json:"market"`
 }
 
+type alertSaveResult struct {
+	Index   int    `json:"index"`
+	Status  string `json:"status"`
+	ID      int64  `json:"id,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
 type alertDTO struct {
-	ID              int64   `json:"id"`
-	Code            string  `json:"code"`
-	Name            string  `json:"name"`
-	Market          string  `json:"market"`
-	Direction       string  `json:"direction"`
-	Price           float64 `json:"price"`
-	Note            string  `json:"note"`
-	Source          string  `json:"source"`
-	Enabled         bool    `json:"enabled"`
-	LastState       string  `json:"lastState"`
-	LastTriggeredAt string  `json:"lastTriggeredAt"`
-	TriggerCount    int64   `json:"triggerCount"`
-	CreatedAt       string  `json:"createdAt"`
+	ID               int64   `json:"id"`
+	Code             string  `json:"code"`
+	Name             string  `json:"name"`
+	Market           string  `json:"market"`
+	Direction        string  `json:"direction"`
+	Price            float64 `json:"price"`
+	Note             string  `json:"note"`
+	Source           string  `json:"source"`
+	Enabled          bool    `json:"enabled"`
+	Mode             string  `json:"mode"`
+	Phase            string  `json:"phase"`
+	MinVolumeRatio   float64 `json:"minVolumeRatio"`
+	BookSide         string  `json:"bookSide"`
+	MinBookBias      float64 `json:"minBookBias"`
+	NeedsReview      bool    `json:"needsReview"`
+	Status           string  `json:"status"`
+	Reason           string  `json:"reason"`
+	PositionRevision *int64  `json:"positionRevision"`
+	UsePosition      bool    `json:"usePosition"`
+	LastState        string  `json:"lastState"`
+	LastTriggeredAt  string  `json:"lastTriggeredAt"`
+	TriggerCount     int64   `json:"triggerCount"`
+	CreatedAt        string  `json:"createdAt"`
 }
 
 type alertEventDTO struct {
-	ID          int64   `json:"id"`
-	AlertID     int64   `json:"alertId"`
-	Code        string  `json:"code"`
-	Name        string  `json:"name"`
-	Price       float64 `json:"price"`
-	Threshold   float64 `json:"threshold"`
-	Direction   string  `json:"direction"`
-	TriggeredAt string  `json:"triggeredAt"`
+	ID            int64          `json:"id"`
+	AlertID       int64          `json:"alertId"`
+	Code          string         `json:"code"`
+	Name          string         `json:"name"`
+	Price         float64        `json:"price"`
+	Threshold     float64        `json:"threshold"`
+	Direction     string         `json:"direction"`
+	Mode          string         `json:"mode"`
+	Evidence      *alertEvidence `json:"evidence,omitempty"`
+	TriggeredAt   string         `json:"triggeredAt"`
+	CurrentStatus string         `json:"currentStatus,omitempty"`
 }
 
 type alertSuggestionDTO struct {
-	Code      string  `json:"code"`
-	Name      string  `json:"name"`
-	Direction string  `json:"direction"`
-	Price     float64 `json:"price"`
-	Note      string  `json:"note"`
-	Valid     bool    `json:"valid"`
-	Reason    string  `json:"reason"`
+	Code             string  `json:"code"`
+	Name             string  `json:"name"`
+	Direction        string  `json:"direction"`
+	Price            float64 `json:"price"`
+	Note             string  `json:"note"`
+	Mode             string  `json:"mode"`
+	Phase            string  `json:"phase"`
+	MinVolumeRatio   float64 `json:"minVolumeRatio"`
+	BookSide         string  `json:"bookSide"`
+	MinBookBias      float64 `json:"minBookBias"`
+	Valid            bool    `json:"valid"`
+	Reason           string  `json:"reason"`
+	PositionRevision *int64  `json:"positionRevision"`
 }
 
 type analysisDTO struct {
@@ -165,13 +214,27 @@ type promptDTO struct {
 }
 
 type mobileSettingsDTO struct {
-	DefaultAIConfigID int64 `json:"defaultAiConfigId"`
-	DefaultPromptID   int64 `json:"defaultPromptId"`
-	AutoExtractAlerts bool  `json:"autoExtractAlerts"`
-	PollIntervalSec   int   `json:"pollIntervalSec"`
-	EnableTools       bool  `json:"enableTools"`
-	Thinking          bool  `json:"thinking"`
-	PushEnabled       bool  `json:"pushEnabled"`
+	DefaultAIConfigID int64         `json:"defaultAiConfigId"`
+	DefaultPromptID   int64         `json:"defaultPromptId"`
+	AutoExtractAlerts bool          `json:"autoExtractAlerts"`
+	PollIntervalSec   int           `json:"pollIntervalSec"`
+	EnableTools       bool          `json:"enableTools"`
+	Thinking          bool          `json:"thinking"`
+	PushEnabled       bool          `json:"pushEnabled"`
+	TradeFeeRate      string        `json:"tradeFeeRate"`
+	TradeFeeRules     tradeFeeRules `json:"tradeFeeRules"`
+}
+
+type tradeFeeRule struct {
+	Mode       string `json:"mode"`
+	Rate       string `json:"rate"`
+	Commission string `json:"commission"`
+	Minimum    string `json:"minimum"`
+}
+
+type tradeFeeRules struct {
+	Buy  tradeFeeRule `json:"buy"`
+	Sell tradeFeeRule `json:"sell"`
 }
 
 type versionDTO struct {

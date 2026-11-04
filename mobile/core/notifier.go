@@ -36,13 +36,18 @@ func currentNotifier() Notifier {
 	return notifierV
 }
 
-func notifyDevice(title, body, payload string) {
+func notifyDevice(title, body, payload string) (status string) {
 	n := currentNotifier()
 	if n == nil {
-		return
+		return "no_notifier"
 	}
-	defer func() { _ = recover() }()
+	defer func() {
+		if recover() != nil {
+			status = "bridge_failed"
+		}
+	}()
 	n.Notify(title, body, payload)
+	return "bridge_delivered"
 }
 
 func updateMonitorStatus(active int) {

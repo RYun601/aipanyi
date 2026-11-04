@@ -33,15 +33,28 @@ class MainActivity : AppCompatActivity() {
     private lateinit var progress: ProgressBar
     private lateinit var errorView: TextView
 
-    private var baseUrl: String? = null
+    private var lastGoodUrl: String? = null
+    private var loadingUrl: String? = null
     private var pendingStockCode: String? = null
+    private var pendingEventId: Long? = null
+    private var loadingDocument = false
+    private var loadingStockCode: String? = null
+    private var loadingEventId: Long? = null
     private var coreReceiver: BroadcastReceiver? = null
     private var exiting = false
+    private var requestId: String? = null
+    private var visible = false
+    private var navigationFailed = false
+    private var autoRetried = false
+    private var requestStarted = 0L
     private val handler = Handler(Looper.getMainLooper())
+    private val healthWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val coreTimeout = Runnable {
-        if (baseUrl == null) {
-            showError("本地服务启动失败：请确认通知权限/后台设置后点击重试")
-        }
+        requestId = null
+        navigationFailed = true
+        loadingUrl = null
+        webView.stopLoading()
+        showError("本地页面连接超时，点击重试")
     }
 
     private val notificationPermissionLauncher =
@@ -61,11 +74,11 @@ class MainActivity : AppCompatActivity() {
         errorView = findViewById(R.id.error)
 
         NotificationHelper.ensureChannels(this)
-        pendingStockCode = intent?.getStringExtra("stock_code")
+        readTarget(intent)
 
         setupWebView()
         maybeRequestNotificationPermission()
-        startMonitorServiceAndLoad()
+        registerCoreReceiver()
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -97,13 +110,25 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                progress.visibility = View.VISIBLE
-                errorView.visibility = View.GONE
-                webView.visibility = View.VISIBLE
+                if (matchesLoading(url)) {
+                    progress.visibility = View.VISIBLE
+                    errorView.visibility = View.GONE
+                }
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
-                progress.visibility = View.GONE
+                if (!navigationFailed && CoreUrl.matchesNavigation(loadingUrl, url)) completeNavigation(url!!)
+            }
+
+            override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                if (!navigationFailed && loadingUrl == null && CoreUrl.origin(url)?.let { it == CoreUrl.origin(lastGoodUrl) } == true) {
+                    lastGoodUrl = url
+                }
+                // 同一文档的 hash 导航有时不会收到 onPageFinished。
+                if (!navigationFailed && !loadingDocument && url != null && url == loadingUrl &&
+                    lastGoodUrl?.substringBefore('#') == url.substringBefore('#')) {
+                    completeNavigation(url)
+                }
             }
 
             override fun onReceivedError(
@@ -111,21 +136,39 @@ class MainActivity : AppCompatActivity() {
                 request: WebResourceRequest?,
                 error: WebResourceError?
             ) {
-                if (request?.isForMainFrame == true) {
-                    showError("页面加载失败：${error?.description ?: "未知错误"}")
+                val url = request?.url?.toString()
+                if (request?.isForMainFrame == true &&
+                    (matchesLoading(url) || (loadingUrl == null && url == lastGoodUrl))) {
+                    RuntimeLog.warn(TAG, "navigation failed origin=${CoreUrl.origin(url)} error=${error?.errorCode}")
+                    navigationFailed = true
+                    loadingUrl = null
+                    if (visible) retryConnection(CoreUrl.origin(url))
                 }
             }
         }
         webView.webChromeClient = WebChromeClient()
     }
 
-    private fun startMonitorServiceAndLoad() {
+    private fun requestConnection(recoverOrigin: String? = null) {
+        val id = java.util.UUID.randomUUID().toString()
+        requestId = id
+        requestStarted = android.os.SystemClock.elapsedRealtime()
         errorView.visibility = View.GONE
-        progress.visibility = View.VISIBLE
-        registerCoreReceiver()
-        startMonitorService(MonitorService.ACTION_UI_VISIBLE)
+        if (lastGoodUrl == null || navigationFailed) progress.visibility = View.VISIBLE
+        startMonitorService(MonitorService.ACTION_UI_VISIBLE, id, recoverOrigin)
         handler.removeCallbacks(coreTimeout)
         handler.postDelayed(coreTimeout, 15000)
+    }
+
+    private fun retryConnection(origin: String?) {
+        if (autoRetried) {
+            handler.removeCallbacks(coreTimeout)
+            requestId = null
+            showError("本地页面连接失败，点击重试")
+            return
+        }
+        autoRetried = true
+        requestConnection(origin)
     }
 
     private fun registerCoreReceiver() {
@@ -133,7 +176,8 @@ class MainActivity : AppCompatActivity() {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: android.content.Context?, intent: Intent?) {
                 val url = intent?.getStringExtra(AppNotifier.KEY_URL)
-                if (!url.isNullOrBlank()) onCoreReady(url)
+                val id = intent?.getStringExtra(MonitorService.EXTRA_REQUEST_ID)
+                if (!url.isNullOrBlank() && id != null && id == requestId) onCoreReady(url, id)
             }
         }
         coreReceiver = receiver
@@ -145,31 +189,78 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun onCoreReady(url: String) {
-        // Go core 可能因服务重启换成新端口；旧 WebView 继续 fetch 旧端口会全部失败。
-        if (!CoreUrl.shouldReload(baseUrl, url)) return
-        val firstLoad = baseUrl == null
-        baseUrl = url
-        handler.removeCallbacks(coreTimeout)
-        if (firstLoad || !pendingStockCode.isNullOrBlank()) {
-            loadTarget()
-        } else {
-            reloadCurrentRoute(url)
+    private fun onCoreReady(url: String, id: String) {
+        val origin = CoreUrl.origin(url) ?: return
+        healthWorker.execute {
+            val healthy = CoreUrl.healthy(origin)
+            handler.post {
+                if (!visible || id != requestId) return@post
+                RuntimeLog.info(TAG, "core health origin=$origin healthy=$healthy elapsedMs=${android.os.SystemClock.elapsedRealtime() - requestStarted}")
+                if (!healthy) {
+                    navigationFailed = true
+                    retryConnection(origin)
+                } else {
+                    loadReadyOrigin(origin)
+                }
+            }
         }
     }
 
-    private fun reloadCurrentRoute(url: String) {
-        val current = if (this::webView.isInitialized) webView.url else null
-        webView.loadUrl(CoreUrl.reloadUrl(url, current))
+    private fun loadReadyOrigin(origin: String) {
+        val code = pendingStockCode
+        val eventId = pendingEventId
+        if (code == null && !CoreUrl.shouldReload(lastGoodUrl, origin, navigationFailed) && loadingUrl == null) {
+            handler.removeCallbacks(coreTimeout)
+            requestId = null
+            return
+        }
+        val route = code?.let {
+            val event = eventId?.let { id -> "?eventId=$id" } ?: ""
+            "/stock/${Uri.encode(it)}$event"
+        }
+        val target = CoreUrl.reloadUrl(origin, lastGoodUrl, route)
+        if (loadingUrl == target) return
+        val forceReload = navigationFailed && CoreUrl.origin(lastGoodUrl) == origin
+        loadingStockCode = code
+        loadingEventId = eventId
+        loadingUrl = target
+        navigationFailed = false
+        if (target == lastGoodUrl && !forceReload) {
+            completeNavigation(target)
+            return
+        }
+        webView.visibility = View.VISIBLE
+        loadingDocument = forceReload || CoreUrl.origin(lastGoodUrl) != origin
+        RuntimeLog.info(TAG, "navigation origin=$origin recovery=$forceReload")
+        if (forceReload) {
+            // A hash-only navigation can leave the old document and WS alive.
+            webView.loadUrl("about:blank")
+        }
+        webView.loadUrl(target)
     }
 
-    private fun loadTarget() {
-        val url = baseUrl ?: return
-        val base = url.trimEnd('/')
-        val code = pendingStockCode
-        val target = if (code.isNullOrBlank()) "$base/" else "$base/#/stock/${Uri.encode(code)}"
-        pendingStockCode = null
-        webView.loadUrl(target)
+    private fun matchesLoading(url: String?): Boolean =
+        url != null && loadingUrl != null && CoreUrl.origin(url) == CoreUrl.origin(loadingUrl) &&
+            url.substringBefore('#') == loadingUrl?.substringBefore('#')
+
+    private fun completeNavigation(url: String) {
+        lastGoodUrl = url
+        loadingUrl = null
+        if (loadingStockCode == pendingStockCode && loadingEventId == pendingEventId) {
+            pendingStockCode = null
+            pendingEventId = null
+        }
+        handler.removeCallbacks(coreTimeout)
+        requestId = null
+        progress.visibility = View.GONE
+        RuntimeLog.info(TAG, "navigation ready origin=${CoreUrl.origin(url)} elapsedMs=${android.os.SystemClock.elapsedRealtime() - requestStarted}")
+    }
+
+    private fun readTarget(intent: Intent?) {
+        intent?.getStringExtra("stock_code")?.takeIf { it.isNotBlank() }?.let {
+            pendingStockCode = it
+            pendingEventId = intent.getLongExtra("alert_event_id", 0L).takeIf { id -> id > 0 }
+        }
     }
 
     private fun showError(message: String) {
@@ -177,14 +268,19 @@ class MainActivity : AppCompatActivity() {
         webView.visibility = View.GONE
         errorView.text = message
         errorView.visibility = View.VISIBLE
-        errorView.setOnClickListener { startMonitorServiceAndLoad() }
+        errorView.setOnClickListener {
+            autoRetried = false
+            requestConnection()
+        }
     }
 
-    private fun startMonitorService(action: String = MonitorService.ACTION_UI_VISIBLE) {
+    private fun startMonitorService(action: String, id: String, recoverOrigin: String?) {
         try {
             ContextCompat.startForegroundService(
                 this,
                 Intent(this, MonitorService::class.java).setAction(action)
+                    .putExtra(MonitorService.EXTRA_REQUEST_ID, id)
+                    .putExtra(MonitorService.EXTRA_RECOVER_ORIGIN, recoverOrigin)
             )
             RuntimeLog.info(TAG, "start service action=$action")
         } catch (t: Throwable) {
@@ -284,14 +380,17 @@ class MainActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         RuntimeLog.info(TAG, "onStart")
-        if (baseUrl != null) {
-            startMonitorService(MonitorService.ACTION_UI_VISIBLE)
-        }
+        visible = true
+        autoRetried = false
+        requestConnection()
     }
 
     override fun onStop() {
         super.onStop()
         RuntimeLog.info(TAG, "onStop exiting=$exiting")
+        visible = false
+        requestId = null
+        handler.removeCallbacks(coreTimeout)
         if (exiting || isChangingConfigurations) return
         // 不要把调度状态读回主进程：SharedPreferences 跨进程缓存可能过期。
         // 只通知“UI 不可见”，由 :monitor 进程里的服务按自己新鲜的调度决定是否停止。
@@ -342,10 +441,10 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        val code = intent.getStringExtra("stock_code")
-        if (!code.isNullOrBlank()) {
-            pendingStockCode = code
-            if (baseUrl != null) loadTarget()
+        readTarget(intent)
+        if (visible && pendingStockCode != null) {
+            autoRetried = false
+            requestConnection()
         }
     }
 
@@ -360,6 +459,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         RuntimeLog.info(TAG, "onDestroy")
+        requestId = null
+        healthWorker.shutdownNow()
         handler.removeCallbacks(coreTimeout)
         coreReceiver?.let {
             try {

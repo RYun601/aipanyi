@@ -23,8 +23,12 @@ class MonitorService : Service() {
     @Volatile
     private var waitingForSchedule = false
 
+    private var readyRequestId: String? = null
+
     private var stopRunnable: Runnable? = null
     private var alarmTimeout: Runnable? = null
+    private var earlyStart: Runnable? = null
+    private var earlyWakeLock: android.os.PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -38,30 +42,31 @@ class MonitorService : Service() {
             NotificationHelper.buildOngoing(this, activeCount())
         )
 
-        Thread {
+    }
+
+    private fun ensureCore(recoverOrigin: String? = null) {
+        coreWorker.execute {
+            if (stopping) return@execute
             try {
-                RuntimeLog.info(TAG, "core starting dataDir=${filesDir.absolutePath}")
-                val url = mobilecore.Mobilecore.start(filesDir.absolutePath, notifier)
-                if (stopping) {
-                    RuntimeLog.info(TAG, "core started after stop request, stopping core")
+                val previous = coreUrl
+                if (previous != null && CoreUrl.origin(previous) == recoverOrigin && !CoreUrl.healthy(previous)) {
+                    RuntimeLog.warn(TAG, "restart unhealthy core origin=$recoverOrigin")
+                    coreUrl = null
                     mobilecore.Mobilecore.stop()
-                    return@Thread
                 }
+                val url = mobilecore.Mobilecore.start(filesDir.absolutePath, notifier)
                 coreUrl = url
-                getSharedPreferences(AppNotifier.PREFS, MODE_PRIVATE)
-                    .edit()
-                    .putString(AppNotifier.KEY_URL, url)
-                    .commit()
-                RuntimeLog.info(TAG, "core started url=$url")
-                sendCoreReady(url)
-                if (!waitingForSchedule) {
-                    scheduleStopFromPrefs()
+                handler.post {
+                    if (!stopping && coreUrl == url) {
+                        if (previous != url) RuntimeLog.info(TAG, "core started url=$url")
+                        sendCoreReady(url)
+                        if (!waitingForSchedule) scheduleStopFromPrefs()
+                    }
                 }
             } catch (t: Throwable) {
                 RuntimeLog.error(TAG, "start mobile core failed", t)
-                Log.e(TAG, "start mobile core failed", t)
             }
-        }.start()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -72,10 +77,13 @@ class MonitorService : Service() {
         when (action) {
             ACTION_UI_VISIBLE -> {
                 uiVisible = true
+                readyRequestId = intent?.getStringExtra(EXTRA_REQUEST_ID)
                 RuntimeLog.info(TAG, "ui visible")
+                ensureCore(intent?.getStringExtra(EXTRA_RECOVER_ORIGIN))
             }
             ACTION_UI_HIDDEN -> {
                 uiVisible = false
+                readyRequestId = null
                 RuntimeLog.info(TAG, "ui hidden")
                 stopIfIdle("ui_hidden")
             }
@@ -94,44 +102,66 @@ class MonitorService : Service() {
                 // UpdateMonitorSchedule 写入新窗口。
                 stopRunnable?.let { handler.removeCallbacks(it) }
                 stopRunnable = null
-                uiVisible = false
-                waitingForSchedule = true
-                RuntimeLog.info(TAG, "alarm start; waiting for Go schedule")
-                startAlarmTimeout()
-                refreshCoreForAlarm()
+                startFromAlarm(intent?.getLongExtra(MonitorAlarmReceiver.EXTRA_TARGET, 0L) ?: 0L)
             }
             else -> {
                 scheduleStopFromPrefs()
                 stopIfIdle("sticky_restart")
+                if (!stopping) ensureCore()
             }
         }
 
-        coreUrl?.let { sendCoreReady(it) }
         if (!waitingForSchedule) {
             scheduleStopFromPrefs()
         }
         return START_STICKY
     }
 
-    private fun refreshCoreForAlarm() {
-        Thread {
-            try {
-                RuntimeLog.info(TAG, "refresh core for alarm")
-                val url = mobilecore.Mobilecore.start(filesDir.absolutePath, notifier)
-                if (stopping) {
-                    mobilecore.Mobilecore.stop()
-                    return@Thread
+    private fun startFromAlarm(target: Long) {
+        stopRunnable?.let { handler.removeCallbacks(it) }
+        stopRunnable = null
+        if (earlyStart != null || waitingForSchedule) return
+        waitingForSchedule = true
+        val delay = target - System.currentTimeMillis()
+        if (delay in 1..MonitorScheduler.EARLY_MS) {
+            val power = getSystemService(POWER_SERVICE) as android.os.PowerManager
+            earlyWakeLock = power.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "aipanyi:opening")
+                .apply { acquire(MonitorScheduler.EARLY_MS + 2_000L) }
+            val check = object : Runnable {
+                override fun run() {
+                    val remaining = target - System.currentTimeMillis()
+                    if (remaining in 1..MonitorScheduler.EARLY_MS) {
+                        handler.postDelayed(this, remaining)
+                        return
+                    }
+                    clearEarlyStart()
+                    if (remaining > 0) {
+                        waitingForSchedule = false
+                        stopIfIdle("clock_moved_before_window")
+                        return
+                    }
+                    refreshAlarmWindow()
                 }
-                coreUrl = url
-                getSharedPreferences(AppNotifier.PREFS, MODE_PRIVATE)
-                    .edit()
-                    .putString(AppNotifier.KEY_URL, url)
-                    .commit()
-                sendCoreReady(url)
-            } catch (t: Throwable) {
-                RuntimeLog.error(TAG, "refresh core for alarm failed", t)
             }
-        }.start()
+            earlyStart = check
+            handler.postDelayed(check, delay)
+            RuntimeLog.info(TAG, "early alarm waiting target=${formatTime(target)} delayMs=$delay")
+        } else {
+            refreshAlarmWindow()
+        }
+    }
+
+    private fun clearEarlyStart() {
+        earlyStart?.let { handler.removeCallbacks(it) }
+        earlyStart = null
+        earlyWakeLock?.let { if (it.isHeld) it.release() }
+        earlyWakeLock = null
+    }
+
+    private fun refreshAlarmWindow() {
+        RuntimeLog.info(TAG, "alarm start; waiting for Go schedule")
+        startAlarmTimeout()
+        ensureCore()
     }
 
     private fun startAlarmTimeout() {
@@ -171,8 +201,8 @@ class MonitorService : Service() {
     }
 
     private fun stopIfIdle(reason: String) {
-        if (uiVisible) {
-            RuntimeLog.info(TAG, "keep service reason=$reason uiVisible=true")
+        if (uiVisible || earlyStart != null || waitingForSchedule) {
+            RuntimeLog.info(TAG, "keep service reason=$reason uiVisible=$uiVisible waiting=$waitingForSchedule")
             return
         }
         if (MonitorScheduler.isInWindow(this)) {
@@ -190,25 +220,22 @@ class MonitorService : Service() {
         if (stopping) return
         stopping = true
         waitingForSchedule = false
+        clearEarlyStart()
         alarmTimeout?.let { handler.removeCallbacks(it) }
         alarmTimeout = null
         RuntimeLog.info(TAG, "stop service reason=$reason")
-        Thread {
-            try {
-                mobilecore.Mobilecore.stop()
-            } catch (t: Throwable) {
-                RuntimeLog.error(TAG, "stop mobile core failed", t)
-            }
-        }.start()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
     private fun sendCoreReady(url: String) {
+        val id = readyRequestId ?: return
+        if (!uiVisible) return
         try {
             val ready = Intent(AppNotifier.ACTION_CORE_READY)
                 .setPackage(packageName)
                 .putExtra(AppNotifier.KEY_URL, url)
+                .putExtra(EXTRA_REQUEST_ID, id)
             sendBroadcast(ready)
         } catch (t: Throwable) {
             RuntimeLog.error(TAG, "send core ready failed", t)
@@ -223,16 +250,18 @@ class MonitorService : Service() {
 
     override fun onDestroy() {
         RuntimeLog.info(TAG, "service onDestroy")
+        clearEarlyStart()
         stopRunnable?.let { handler.removeCallbacks(it) }
         alarmTimeout?.let { handler.removeCallbacks(it) }
         handler.removeCallbacksAndMessages(null)
-        Thread {
+        stopping = true
+        coreWorker.execute {
             try {
                 mobilecore.Mobilecore.stop()
             } catch (t: Throwable) {
                 RuntimeLog.error(TAG, "onDestroy stop core failed", t)
             }
-        }.start()
+        }
         instance = null
         isRunning = false
         MonitorScheduler.scheduleNext(applicationContext, "service_destroy")
@@ -251,6 +280,9 @@ class MonitorService : Service() {
 
     companion object {
         const val TAG = "MonitorService"
+        const val EXTRA_REQUEST_ID = "connection_request_id"
+        const val EXTRA_RECOVER_ORIGIN = "recover_origin"
+        private val coreWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
         const val ACTION_UI_VISIBLE = "com.aipanyi.mobile.UI_VISIBLE"
         const val ACTION_UI_HIDDEN = "com.aipanyi.mobile.UI_HIDDEN"
         const val ACTION_EXIT = "com.aipanyi.mobile.EXIT"
@@ -265,9 +297,21 @@ class MonitorService : Service() {
         var isRunning: Boolean = false
             private set
 
+        fun deliverOpeningAlarm(target: Long): Boolean {
+            val service = instance ?: return false
+            if (service.stopping) return false
+            service.startFromAlarm(target)
+            return true
+        }
+
+        fun onWindowEnd() {
+            instance?.stopIfIdle("wall_clock_end_alarm")
+        }
+
         fun onScheduleChanged() {
             instance?.let {
                 it.handler.post {
+                    if (it.earlyStart != null) return@post
                     it.waitingForSchedule = false
                     it.alarmTimeout?.let { r -> it.handler.removeCallbacks(r) }
                     it.alarmTimeout = null

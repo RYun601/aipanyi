@@ -76,6 +76,19 @@ adb shell run-as com.aipanyi.mobile cat files/aipanyi/logs/info.log
 
 `run-as` 仅对 debug 包有效；release 包请用文件管理器进入应用私有目录导出。
 
+### 真机 UI 层级快照
+
+`uiautomator dump` 用于真机调试。每次明确指定输出路径，统一保存在手机的「内部存储 → Documents → aipanyi → ui-dumps」。
+
+```powershell
+$uiDumpDir = '/sdcard/Documents/aipanyi/ui-dumps'
+$uiDumpName = 'aipanyi-ui-{0}.xml' -f (Get-Date -Format 'yyyyMMdd-HHmmss')
+adb shell mkdir -p $uiDumpDir
+adb shell uiautomator dump "$uiDumpDir/$uiDumpName"
+```
+
+快照是当前界面的调试产物，应用的数据库和运行日志仍由上面的应用私有目录管理。
+
 ## 后台调度
 
 - Go 核心按启用提醒的市场计算当前/下一个交易窗口，通过 `UpdateMonitorSchedule` 下发给 Kotlin。

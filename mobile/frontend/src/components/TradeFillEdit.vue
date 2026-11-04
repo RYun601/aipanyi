@@ -1,0 +1,266 @@
+<script setup>
+import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { showConfirmDialog, showToast } from 'vant'
+import { api, submitTradeDraft } from '../api'
+import { estimateTradeFee } from '../tradeFee'
+
+const props = defineProps({
+  show: Boolean,
+  code: { type: String, required: true },
+  baseline: Boolean,
+  fill: { type: Object, default: null },
+  alertEventId: { type: Number, default: 0 },
+  position: { type: Object, default: null },
+  legacyCost: { type: Number, default: 0 },
+  legacyVolume: { type: Number, default: 0 }
+})
+const emit = defineEmits(['update:show', 'saved'])
+const form = reactive({})
+const saving = ref(false)
+const uncertain = ref(null)
+const firstBaseline = ref(false)
+const firstFillPending = ref(false)
+const verifiedPosition = ref(null)
+const feeRules = ref(null)
+const feeEstimate = computed(() => estimateTradeFee({
+  code: props.code, side: form.side, quantity: form.quantity, price: form.price, at: form.at
+}, feeRules.value))
+const feeValue = computed(() => form.feeEdited ? form.fee : (feeEstimate.value?.total ?? ''))
+const currentFeeRule = computed(() => feeRules.value?.[form.side])
+const position = computed(() => props.position || (verifiedPosition.value?.revision ? verifiedPosition.value : null))
+const isBaseline = computed(() => props.baseline || firstBaseline.value)
+const needsBaseline = computed(() => !isBaseline.value && !props.fill && !position.value)
+const title = computed(() => isBaseline.value ? '核对期初持仓' : props.fill ? '修改成交' : '记录成交')
+const submitLabel = computed(() => {
+  if (uncertain.value) return '重试提交'
+  if (isBaseline.value) return '预览期初'
+  return needsBaseline.value ? '继续核对期初' : '预览并确认'
+})
+let fillDraft = null
+let feeRateRequest = 0
+
+function localTime(value = Date.now()) {
+  const date = new Date(value)
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 19)
+}
+
+function initializeForm(baseline, at) {
+  Object.assign(form, {
+    requestId: crypto.randomUUID(),
+    side: props.fill?.side || 'buy',
+    quantity: baseline ? String(position.value?.quantity ?? props.legacyVolume) : String(props.fill?.quantity || ''),
+    price: baseline ? String(position.value?.averageCost ?? Number(props.legacyCost || 0).toFixed(4)) : props.fill?.price || '',
+    fee: props.fill?.fee || '',
+    feeEdited: !!props.fill,
+    note: props.fill?.note || '',
+    at: localTime(at)
+  })
+}
+
+watch(() => props.show, async (open) => {
+  const request = ++feeRateRequest
+  if (!open || uncertain.value) return
+  firstBaseline.value = false
+  firstFillPending.value = false
+  verifiedPosition.value = null
+  fillDraft = null
+  feeRules.value = null
+  initializeForm(props.baseline, props.fill?.at || Date.now())
+  if (props.baseline || props.fill) return
+  try {
+    const settings = await api.getSettings()
+    if (request === feeRateRequest) feeRules.value = settings?.tradeFeeRules ?? null
+  } catch {
+    // The fee field stays editable if settings cannot be read.
+  }
+})
+
+function editFee(value) {
+  form.fee = value
+  form.feeEdited = true
+}
+
+function selectSide(side) {
+  if (form.side === side) return
+  form.side = side
+  if (!props.fill) {
+    form.fee = ''
+    form.feeEdited = false
+  }
+}
+
+function returnToFill() {
+  Object.assign(form, fillDraft)
+  fillDraft = null
+  firstBaseline.value = false
+}
+
+function close() {
+  if (saving.value) return
+  if (firstBaseline.value) returnToFill()
+  else emit('update:show', false)
+}
+
+function makeRequest() {
+  const at = new Date(form.at)
+  const quantity = Number(form.quantity)
+  if (!form.at || !form.quantity.trim() || !Number.isFinite(at.getTime()) ||
+      !Number.isSafeInteger(quantity) || quantity < 0 || !form.price.trim()) {
+    throw new Error('请填写有效的股数、价格和时间')
+  }
+  const base = { requestId: form.requestId, code: props.code }
+  if (isBaseline.value) {
+    if (firstBaseline.value && at.getTime() >= Date.parse(fillDraft.at)) {
+      throw new Error('期初时间要早于刚才填写的成交时间')
+    }
+    return { kind: 'baseline', input: { ...base, at: at.toISOString(), quantity, unitCost: form.price } }
+  }
+  if (quantity === 0) throw new Error('成交股数必须大于 0')
+  const fee = feeValue.value.trim()
+  if (!fee) throw new Error('请填写费用，或确认费用为 0')
+  const fill = {
+    ...base, at: at.toISOString(), quantity, price: form.price, fee,
+    side: form.side, note: form.note, alertEventId: props.fill?.alertEventId || props.alertEventId || 0
+  }
+  return props.fill ? { kind: 'correction', input: { ...base, targetId: props.fill.id, replacement: fill } }
+    : { kind: 'fill', input: fill }
+}
+
+const calls = {
+  baseline: api.previewTradeBaseline,
+  fill: api.previewTrade,
+  correction: api.previewTradeCorrection
+}
+
+async function save() {
+  if (saving.value) return
+  saving.value = true
+  let submitted = false
+  let confirmFirstFill = false
+  let request
+  try {
+    request = uncertain.value
+    if (!request) {
+      request = makeRequest()
+      if (needsBaseline.value) {
+        verifiedPosition.value = await api.getTradePosition(props.code)
+        if (!position.value) {
+          fillDraft = { ...form }
+          firstBaseline.value = true
+          initializeForm(true, Date.parse(request.input.at) - 1000)
+          return
+        }
+      }
+      const preview = await calls[request.kind](request.input)
+      const before = position.value?.quantity ?? props.legacyVolume
+      const fill = request.kind === 'correction' ? request.input.replacement : request.kind === 'fill' ? request.input : null
+      const direction = fill?.side === 'sell' ? '卖出' : '买入'
+      const details = fill ? direction + ' ' + fill.quantity + ' 股 × ' + fill.price + '，费用 ' + fill.fee + '\n'
+        : firstBaseline.value ? '保存期初后，接下来还需确认成交入账。\n' : ''
+      try {
+        await showConfirmDialog({
+          title: fill ? (request.kind === 'correction' ? '确认修改成交' : '确认' + direction) : title.value,
+          message: details + '股数 ' + before + ' → ' + preview.quantity +
+            '\n剩余持仓均价 ' + preview.averageCost + '\n每股净投入 ' + preview.netCost,
+          confirmButtonText: firstBaseline.value ? '保存期初并继续' : isBaseline.value ? '保存期初' : '确认入账'
+        })
+      } catch {
+        return
+      }
+      request.input.expectedRevision = preview.revision - 1
+    }
+    submitted = true
+    const result = await submitTradeDraft(request)
+    uncertain.value = null
+    if (firstBaseline.value) {
+      verifiedPosition.value = result
+      returnToFill()
+      firstFillPending.value = true
+      emit('saved', result)
+      confirmFirstFill = true
+      return
+    }
+    emit('saved', result)
+    emit('update:show', false)
+    showToast(request.kind === 'baseline' ? '期初已保存' : request.kind === 'correction' ? '成交修改已保存' : '成交已入账')
+  } catch (error) {
+    if (submitted && (!error.status || error.status >= 500)) {
+      uncertain.value = request
+      showToast('结果未确认，请用同一笔请求重试')
+    } else {
+      uncertain.value = null
+      showToast(error.message || '提交失败')
+    }
+  } finally {
+    saving.value = false
+    if (confirmFirstFill) {
+      await nextTick()
+      if (props.show) await save()
+    }
+  }
+}
+</script>
+
+<template>
+  <van-popup :show="show" position="bottom" round :close-on-click-overlay="!saving && !uncertain"
+    @update:show="(open) => { if (!open && !uncertain) close() }">
+    <div class="sheet">
+      <div class="sheet-title">{{ title }}</div>
+      <p v-if="firstBaseline" class="muted">请核对这笔成交前的股数和单位成本。保存期初后会直接打开成交确认。</p>
+      <p v-else-if="isBaseline" class="muted">期初应早于首笔成交。新增对账期初会开启新一段账本，旧记录可在历史中查看。</p>
+      <p v-else-if="fill" class="muted">
+        {{ fill.pastSegment ? '将重算这笔成交及当天汇总。后续对账期初仍作为新账段的起点。' : '保存后会按修改后的成交重算持仓。原记录保留供核对。' }}
+      </p>
+      <p v-else-if="alertEventId" class="muted">关联提醒 #{{ alertEventId }}</p>
+      <p v-if="needsBaseline" class="muted">首次记账可先填成交，提交前再核对期初持仓。</p>
+      <p v-if="firstFillPending" class="muted">期初已保存，这笔成交还没入账。请核对后确认入账。</p>
+      <van-cell-group :aria-busy="saving">
+        <van-field v-if="!isBaseline" label="方向" :disabled="saving || !!uncertain">
+          <template #input>
+            <van-radio-group :model-value="form.side" direction="horizontal" :disabled="saving || !!uncertain" @update:model-value="selectSide">
+              <van-radio name="buy">买入</van-radio>
+              <van-radio name="sell">卖出</van-radio>
+            </van-radio-group>
+          </template>
+        </van-field>
+        <van-field v-model="form.quantity" type="digit" :label="isBaseline ? '期初股数' : '股数'" :disabled="saving || !!uncertain" />
+        <van-field v-model="form.price" type="number" :label="isBaseline ? '单位成本' : '成交价格'" :disabled="saving || !!uncertain" />
+        <van-field :label="isBaseline ? '期初时间' : '成交时间'">
+          <template #input>
+            <input v-model="form.at" type="datetime-local" step="1" class="trade-time" :disabled="saving || !!uncertain" />
+          </template>
+        </van-field>
+        <template v-if="!isBaseline">
+          <van-field
+            :model-value="feeValue"
+            type="number"
+            label="费用"
+            :disabled="saving || !!uncertain"
+            @update:model-value="editFee"
+          >
+            <template v-if="feeEstimate && form.feeEdited" #button>
+              <van-button size="small" plain :disabled="saving || !!uncertain" @click="form.feeEdited = false">恢复自动</van-button>
+            </template>
+          </van-field>
+          <div v-if="feeEstimate && !form.feeEdited" class="muted" style="padding: 4px 16px">
+            <template v-if="feeEstimate.commission">
+              估算佣金 {{ feeEstimate.commission }} · 印花税 {{ feeEstimate.stampDuty }} · 过户费 {{ feeEstimate.transfer }}
+            </template>
+            <template v-else>按{{ form.side === 'buy' ? '买入' : '卖出' }}费率 {{ currentFeeRule.rate }}% 计算</template>
+            。可修改为实际费用。
+          </div>
+          <van-checkbox v-if="!feeValue" :model-value="false" style="padding: 8px 16px" :disabled="saving || !!uncertain" @update:model-value="editFee('0')">费用按 0 记</van-checkbox>
+          <van-field v-model="form.note" label="备注" placeholder="可选" maxlength="200" :disabled="saving || !!uncertain" />
+        </template>
+      </van-cell-group>
+      <div class="row" style="margin-top: 12px">
+        <van-button plain round block :disabled="saving || !!uncertain" @click="close">{{ firstBaseline ? '返回成交' : '取消' }}</van-button>
+        <van-button type="primary" round block :loading="saving" @click="save">{{ submitLabel }}</van-button>
+      </div>
+    </div>
+  </van-popup>
+</template>
+
+<style scoped>
+.trade-time { max-width: 100%; color: inherit; font: inherit; background: transparent; border: 0; }
+</style>

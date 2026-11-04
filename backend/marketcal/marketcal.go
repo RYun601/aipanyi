@@ -6,6 +6,7 @@
 package marketcal
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -27,6 +28,10 @@ var tradingDayCache = freecache.NewCache(64 * 1024)
 
 // IsTradingDay 判断 A 股是否为交易日。
 func IsTradingDay(date time.Time) bool {
+	return isATradingDayContext(context.Background(), date)
+}
+
+func isATradingDayContext(ctx context.Context, date time.Time) bool {
 	date = date.In(shanghai)
 	weekday := date.Weekday()
 	dateStr := date.Format("2006-01-02")
@@ -41,7 +46,10 @@ func IsTradingDay(date time.Time) bool {
 		return false
 	}
 
-	isHoliday, apiOk := checkHolidayAPI(dateStr)
+	isHoliday, apiOk := checkHolidayAPI(ctx, dateStr)
+	if ctx.Err() != nil {
+		return false
+	}
 	if apiOk {
 		if isHoliday {
 			_ = tradingDayCache.Set(cacheKey, []byte("0"), 86400)
@@ -55,7 +63,7 @@ func IsTradingDay(date time.Time) bool {
 	return true
 }
 
-func checkHolidayAPI(date string) (isHoliday bool, apiOk bool) {
+func checkHolidayAPI(ctx context.Context, date string) (isHoliday bool, apiOk bool) {
 	type holidayResp struct {
 		Code    int `json:"code"`
 		Holiday struct {
@@ -64,7 +72,7 @@ func checkHolidayAPI(date string) (isHoliday bool, apiOk bool) {
 		} `json:"holiday"`
 	}
 	var result holidayResp
-	resp, err := data.SharedHTTPClient.R().SetResult(&result).Get(fmt.Sprintf("https://timor.tech/api/holiday/info/%s", date))
+	resp, err := data.SharedHTTPClient.R().SetContext(ctx).SetResult(&result).Get(fmt.Sprintf("https://timor.tech/api/holiday/info/%s", date))
 	if err != nil || resp.StatusCode() != 200 {
 		return false, false
 	}
@@ -117,6 +125,10 @@ func IsHKTradingTime(date time.Time) bool {
 }
 
 func isHKTradingDay(date time.Time) bool {
+	return isHKTradingDayContext(context.Background(), date)
+}
+
+func isHKTradingDayContext(ctx context.Context, date time.Time) bool {
 	date = date.In(shanghai)
 	weekday := date.Weekday()
 	dateStr := date.Format("2006-01-02")
@@ -131,7 +143,10 @@ func isHKTradingDay(date time.Time) bool {
 		return false
 	}
 
-	isHoliday, apiOk := checkHKHolidayAPI(dateStr)
+	isHoliday, apiOk := checkHKHolidayAPI(ctx, dateStr)
+	if ctx.Err() != nil {
+		return false
+	}
 	if apiOk {
 		if isHoliday {
 			_ = tradingDayCache.Set(cacheKey, []byte("0"), 86400)
@@ -145,7 +160,7 @@ func isHKTradingDay(date time.Time) bool {
 	return true
 }
 
-func checkHKHolidayAPI(date string) (isHoliday bool, apiOk bool) {
+func checkHKHolidayAPI(ctx context.Context, date string) (isHoliday bool, apiOk bool) {
 	type klineResp struct {
 		Data struct {
 			Klines []string `json:"klines"`
@@ -154,7 +169,7 @@ func checkHKHolidayAPI(date string) (isHoliday bool, apiOk bool) {
 	var result klineResp
 	dateClean := strings.ReplaceAll(date, "-", "")
 	apiURL := fmt.Sprintf("https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=100.HSI&fields1=f1&fields2=f51&klt=101&fqt=0&beg=%s&end=%s", dateClean, dateClean)
-	resp, err := data.SharedHTTPClient.R().SetResult(&result).Get(apiURL)
+	resp, err := data.SharedHTTPClient.R().SetContext(ctx).SetResult(&result).Get(apiURL)
 	if err != nil || resp.StatusCode() != 200 {
 		return false, false
 	}
@@ -193,6 +208,10 @@ func IsUSTradingTime(date time.Time) bool {
 }
 
 func isUSTradingDay(estTime time.Time) bool {
+	return isUSTradingDayContext(context.Background(), estTime)
+}
+
+func isUSTradingDayContext(ctx context.Context, estTime time.Time) bool {
 	weekday := estTime.Weekday()
 	dateStr := estTime.Format("2006-01-02")
 
@@ -206,7 +225,10 @@ func isUSTradingDay(estTime time.Time) bool {
 		return false
 	}
 
-	isHoliday, apiOk := checkUSHolidayAPI(dateStr)
+	isHoliday, apiOk := checkUSHolidayAPI(ctx, dateStr)
+	if ctx.Err() != nil {
+		return false
+	}
 	if apiOk {
 		if isHoliday {
 			_ = tradingDayCache.Set(cacheKey, []byte("0"), 86400)
@@ -220,7 +242,7 @@ func isUSTradingDay(estTime time.Time) bool {
 	return true
 }
 
-func checkUSHolidayAPI(date string) (isHoliday bool, apiOk bool) {
+func checkUSHolidayAPI(ctx context.Context, date string) (isHoliday bool, apiOk bool) {
 	type usHolidayResp struct {
 		IsHoliday    bool   `json:"is_holiday"`
 		IsEarlyClose bool   `json:"is_early_close"`
@@ -229,7 +251,7 @@ func checkUSHolidayAPI(date string) (isHoliday bool, apiOk bool) {
 	}
 	var result usHolidayResp
 	apiURL := fmt.Sprintf("https://fincalapi.com/v1/day_status?calendar=NYSE&date=%s", date)
-	resp, err := data.SharedHTTPClient.R().SetResult(&result).Get(apiURL)
+	resp, err := data.SharedHTTPClient.R().SetContext(ctx).SetResult(&result).Get(apiURL)
 	if err != nil || resp.StatusCode() != 200 {
 		return false, false
 	}
@@ -273,6 +295,30 @@ func IsTradingTimeForMarket(market string, date time.Time) bool {
 		return IsUSTradingTime(date)
 	default:
 		return IsTradingTime(date)
+	}
+}
+
+// IsMonitorTradingTime applies the mobile monitor's wall-clock boundaries before
+// doing a cancellable calendar lookup. An expired lookup does not cache a fallback.
+func IsMonitorTradingTime(ctx context.Context, market string, date time.Time) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	switch market {
+	case "HK":
+		local := date.In(shanghai)
+		hour, minute, _ := local.Clock()
+		at := hour*60 + minute
+		return ((at >= 9*60 && at <= 12*60) || (at >= 13*60 && at < 16*60+10)) && isHKTradingDayContext(ctx, local)
+	case "US":
+		local := date.In(newYork)
+		hour := local.Hour()
+		return hour >= 4 && hour < 20 && isUSTradingDayContext(ctx, local)
+	default:
+		local := date.In(shanghai)
+		hour, minute, _ := local.Clock()
+		at := hour*60 + minute
+		return ((at >= 9*60+15 && at <= 11*60+30) || (at >= 13*60 && at < 15*60)) && isATradingDayContext(ctx, local)
 	}
 }
 

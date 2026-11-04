@@ -12,6 +12,7 @@ import (
 var (
 	scheduleMu      sync.Mutex
 	schedulePending bool
+	scheduleDirty   bool
 )
 
 func scheduleMonitorRefresh() {
@@ -20,6 +21,7 @@ func scheduleMonitorRefresh() {
 	}
 	scheduleMu.Lock()
 	if schedulePending {
+		scheduleDirty = true
 		scheduleMu.Unlock()
 		return
 	}
@@ -27,12 +29,17 @@ func scheduleMonitorRefresh() {
 	scheduleMu.Unlock()
 
 	go func() {
-		defer func() {
+		for {
+			refreshMonitorSchedule()
 			scheduleMu.Lock()
-			schedulePending = false
+			if !scheduleDirty {
+				schedulePending = false
+				scheduleMu.Unlock()
+				return
+			}
+			scheduleDirty = false
 			scheduleMu.Unlock()
-		}()
-		refreshMonitorSchedule()
+		}
 	}()
 }
 
