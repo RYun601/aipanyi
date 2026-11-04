@@ -344,6 +344,13 @@ func (a *mobileApp) SaveAlert(alert alertDTO) (int64, error) {
 	return saveAlert(alert)
 }
 
+func (a *mobileApp) SaveAlertSuggestions(items []alertDTO) ([]alertSaveResult, error) {
+	if len(items) > 100 {
+		return nil, errors.New("一次最多提交 100 条提醒")
+	}
+	return saveAlertSuggestions(items), nil
+}
+
 func (a *mobileApp) DeleteAlert(id int64) (string, error) {
 	return deleteAlert(id)
 }

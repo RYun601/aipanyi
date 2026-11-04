@@ -79,6 +79,13 @@ type stockBasicDTO struct {
 	Market string `json:"market"`
 }
 
+type alertSaveResult struct {
+	Index   int    `json:"index"`
+	Status  string `json:"status"`
+	ID      int64  `json:"id,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
 type alertDTO struct {
 	ID              int64   `json:"id"`
 	Code            string  `json:"code"`

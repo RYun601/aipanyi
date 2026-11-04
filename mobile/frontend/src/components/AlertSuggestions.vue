@@ -12,7 +12,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:show', 'saved'])
 
-const state = reactive({ items: [] })
+const state = reactive({ items: [], saving: false })
 
 watch(
   () => props.show,
@@ -37,39 +37,46 @@ async function confirm() {
     showToast('请至少选择一条')
     return
   }
-  let ok = 0
-  for (const item of selected) {
-    const price = Number(item.price)
-    if (!Number.isFinite(price) || price <= 0) continue
-    try {
-      await api.saveAlert({
-        id: 0,
-        code: props.code,
-        name: props.name,
-        direction: item.direction,
-        price,
-        note: item.note,
-        enabled: true,
-        source: 'ai'
-      })
-      ok++
-    } catch (e) {
-      // 单条失败不阻塞其它条目，最后统一提示
-      console.warn('save alert failed', e)
+  if (state.saving) return
+  state.saving = true
+  try {
+    const results = await api.saveAlertSuggestions(selected.map((item) => ({
+      code: props.code,
+      name: props.name,
+      direction: item.direction,
+      price: Number(item.price) || 0,
+      note: item.note,
+      enabled: true,
+      source: 'ai'
+    })))
+    let saved = 0
+    let resolved = 0
+    for (const result of results) {
+      const item = selected[result.index]
+      item.done = result.status === 'saved' || result.status === 'duplicate'
+      item.result = result.status === 'saved' ? '已添加' : result.message
+      if (result.status === 'saved') saved++
+      if (item.done) {
+        item.selected = false
+        resolved++
+      }
     }
-  }
-  if (ok > 0) {
-    showToast(`已添加 ${ok} 条提醒`)
+    if (resolved) emit('saved')
+    if (resolved === selected.length) {
+      showToast(saved ? '已添加 ' + saved + ' 条提醒' : '所选提醒已存在')
+      close()
+    }
+  } catch (e) {
     emit('saved')
-    close()
-  } else {
-    showToast('添加失败，请检查价格')
+    showToast(e.message || '提交结果未确认，请重试')
+  } finally {
+    state.saving = false
   }
 }
 </script>
 
 <template>
-  <van-popup :show="show" position="bottom" round @update:show="emit('update:show', $event)">
+  <van-popup :show="show" position="bottom" round :close-on-click-overlay="!state.saving" @update:show="emit('update:show', $event)">
     <div class="sheet">
       <div class="sheet-title">AI 建议的价格提醒</div>
       <div class="muted" style="margin-bottom: 12px">
@@ -82,17 +89,18 @@ async function confirm() {
 
       <div v-for="(item, idx) in state.items" :key="idx" class="card" :style="item.valid ? '' : 'opacity:.55'">
         <div class="row">
-          <van-checkbox v-model="item.selected" :disabled="!item.valid">
+          <van-checkbox v-model="item.selected" :disabled="!item.valid || item.done || state.saving">
             <span class="small">
               {{ directionText(item.direction) }}
               <b>{{ item.price }}</b>
             </span>
           </van-checkbox>
-          <span class="tag-mini">{{ item.valid ? '可添加' : item.reason || '无效' }}</span>
+          <span class="tag-mini">{{ item.result || (item.valid ? '可添加' : item.reason || '无效') }}</span>
         </div>
         <van-field
           v-if="item.valid"
           v-model="item.price"
+          :disabled="item.done || state.saving"
           type="number"
           label="价格"
           input-align="right"
@@ -102,6 +110,7 @@ async function confirm() {
           <div class="muted suggestion-note-label">备注</div>
           <van-field
             v-model="item.note"
+            :disabled="item.done || state.saving"
             type="textarea"
             rows="2"
             autosize
@@ -111,8 +120,8 @@ async function confirm() {
       </div>
 
       <div class="row" style="margin-top: 12px">
-        <van-button plain block round @click="close">取消</van-button>
-        <van-button type="primary" block round @click="confirm">确认添加</van-button>
+        <van-button plain block round :disabled="state.saving" @click="close">取消</van-button>
+        <van-button type="primary" block round :loading="state.saving" @click="confirm">确认添加</van-button>
       </div>
     </div>
   </van-popup>

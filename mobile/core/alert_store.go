@@ -3,13 +3,16 @@ package mobilecore
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"aipanyi/backend/data"
 	"aipanyi/backend/db"
 	"aipanyi/backend/logger"
 	"aipanyi/backend/marketcal"
+	"gorm.io/gorm"
 )
 
 const maxEnabledAlerts = 50
@@ -92,100 +95,174 @@ func backfillAlertMarkets() error {
 	return nil
 }
 
-func saveAlert(in alertDTO) (int64, error) {
-	norm := normalizeCode(in.Code)
-	if norm == "" {
-		return 0, errors.New("股票代码为空")
-	}
-	direction := strings.ToLower(strings.TrimSpace(in.Direction))
-	if direction != "above" && direction != "below" {
-		return 0, errors.New("提醒方向只能是 above 或 below")
-	}
-	if in.Price <= 0 {
-		return 0, errors.New("提醒价格必须大于 0")
-	}
-	f := data.NewStockDataApi().GetFollowedStockByStockCode(norm)
-	if f.StockCode == "" {
-		return 0, errors.New("请先关注该股票")
-	}
-	name := f.Name
-	if name == "" {
-		name = stockDisplayName(norm)
-	}
-	note := strings.TrimSpace(in.Note)
-	if len([]rune(note)) > 100 {
-		note = string([]rune(note)[:100])
-	}
-	source := strings.TrimSpace(in.Source)
-	if source != "ai" {
-		source = "manual"
-	}
-	market := marketOf(norm)
+var (
+	alertWriteMu        sync.Mutex
+	errAlertInvalid     = errors.New("股票代码、提醒方向或价格无效")
+	errAlertNotFollowed = errors.New("请先关注该股票")
+	errAlertDuplicate   = errors.New("已存在相同的价格提醒")
+	errAlertLimit       = fmt.Errorf("最多同时启用 %d 条价格提醒", maxEnabledAlerts)
+	errAlertMissing     = errors.New("提醒规则不存在")
+)
 
-	// 更新已有规则
-	if in.ID > 0 {
-		var existing priceAlert
-		if err := db.Dao.First(&existing, uint(in.ID)).Error; err != nil {
-			return 0, errors.New("提醒规则不存在")
-		}
-		if in.Enabled && !existing.Enabled && lenAlertsEnabled() >= maxEnabledAlerts {
-			return 0, fmt.Errorf("最多同时启用 %d 条价格提醒", maxEnabledAlerts)
-		}
-		updates := map[string]any{
-			"stock_code": norm,
-			"stock_name": name,
-			"market":     market,
-			"direction":  direction,
-			"price":      in.Price,
-			"note":       note,
-			"source":     source,
-			"enabled":    in.Enabled,
-			// 改了价格/方向后重新武装，避免拿旧状态误触发。
-			"last_state": "unknown",
-		}
-		if err := db.Dao.Model(&priceAlert{}).Where("id = ?", existing.ID).Updates(updates).Error; err != nil {
-			return 0, err
-		}
-		updateMonitorStatus(lenAlertsEnabled())
-		scheduleMonitorRefresh()
-		return int64(existing.ID), nil
-	}
-
-	// 新建
-	if in.Enabled && lenAlertsEnabled() >= maxEnabledAlerts {
-		return 0, fmt.Errorf("最多同时启用 %d 条价格提醒", maxEnabledAlerts)
-	}
-	var dup int64
-	db.Dao.Model(&priceAlert{}).
-		Where("stock_code = ? AND direction = ? AND price = ? AND enabled = ?", norm, direction, in.Price, true).
-		Count(&dup)
-	if dup > 0 {
-		return 0, errors.New("已存在相同的价格提醒")
-	}
-
-	a := priceAlert{
-		StockCode: norm,
-		StockName: name,
-		Market:    market,
-		Direction: direction,
-		Price:     in.Price,
-		Note:      note,
-		Source:    source,
-		Enabled:   in.Enabled,
-		LastState: "unknown",
-	}
-	if err := db.Dao.Create(&a).Error; err != nil {
-		return 0, err
-	}
-
-	// 创建时若已在触发侧，盘中提醒一次。行情请求放到 goroutine 里，
-	// 避免行情源慢/超时把“保存提醒”的 HTTP 请求拖住几分钟。
-	if a.Enabled {
-		go applyInitialAlertState(a)
-	}
+func refreshAlertMonitor() {
 	updateMonitorStatus(lenAlertsEnabled())
 	scheduleMonitorRefresh()
-	return int64(a.ID), nil
+}
+
+func saveAlert(in alertDTO) (int64, error) {
+	alert, created, err := writeAlert(in)
+	if err != nil {
+		return 0, err
+	}
+	if created && alert.Enabled {
+		go applyInitialAlertState(alert)
+	}
+	refreshAlertMonitor()
+	return int64(alert.ID), nil
+}
+
+func saveAlertSuggestions(items []alertDTO) []alertSaveResult {
+	results := writeAlerts(items)
+	changed := false
+	for i, result := range results {
+		if result.Status != "saved" {
+			continue
+		}
+		changed = true
+		if items[i].Enabled {
+			var a priceAlert
+			if err := db.Dao.First(&a, result.ID).Error; err == nil && a.Enabled {
+				go applyInitialAlertState(a)
+			}
+		}
+	}
+	if changed {
+		refreshAlertMonitor()
+	}
+	return results
+}
+
+func writeAlerts(items []alertDTO) []alertSaveResult {
+	results := make([]alertSaveResult, 0, len(items))
+	for index, item := range items {
+		item.ID = 0 // 批量添加不会修改已存在的规则。
+		alert, _, err := writeAlert(item)
+		result := alertSaveResult{Index: index, ID: int64(alert.ID), Status: "saved"}
+		if err != nil {
+			result.Message = err.Error()
+			switch err {
+			case errAlertInvalid:
+				result.Status = "invalid"
+			case errAlertNotFollowed:
+				result.Status = "not_followed"
+			case errAlertDuplicate:
+				result.Status = "duplicate"
+			case errAlertLimit:
+				result.Status = "limit"
+			default:
+				result.Status = "failed"
+				result.Message = "写入提醒失败，请重试"
+			}
+		}
+		results = append(results, result)
+	}
+	return results
+}
+
+func writeAlert(in alertDTO) (a priceAlert, created bool, err error) {
+	norm := normalizeCode(in.Code)
+	direction := strings.ToLower(strings.TrimSpace(in.Direction))
+	if norm == "" || (direction != "above" && direction != "below") ||
+		in.Price <= 0 || math.IsNaN(in.Price) || math.IsInf(in.Price, 0) {
+		return a, false, errAlertInvalid
+	}
+	alertWriteMu.Lock()
+	defer alertWriteMu.Unlock()
+	err = db.Dao.Transaction(func(tx *gorm.DB) error {
+		var followed data.FollowedStock
+		if err := tx.Where("stock_code = ?", norm).First(&followed).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errAlertNotFollowed
+			}
+			return err
+		}
+		created = in.ID == 0
+		var existing priceAlert
+		if !created {
+			if err := tx.First(&existing, in.ID).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return errAlertMissing
+				}
+				return err
+			}
+		}
+		a = priceAlert{
+			StockCode: norm, StockName: followed.Name, Market: marketOf(norm),
+			Direction: direction, Price: in.Price, Note: strings.TrimSpace(in.Note),
+			Source: "manual", Enabled: in.Enabled, LastState: "unknown",
+		}
+		if a.StockName == "" {
+			a.StockName = norm
+		}
+		if strings.TrimSpace(in.Source) == "ai" {
+			a.Source = "ai"
+		}
+		if note := []rune(a.Note); len(note) > 100 {
+			a.Note = string(note[:100])
+		}
+		if created || a.Enabled {
+			dup, err := duplicateAlert(tx, a, existing.ID, !created)
+			if err != nil {
+				return err
+			}
+			if dup.ID != 0 {
+				a = dup
+				return errAlertDuplicate
+			}
+		}
+		if a.Enabled && !existing.Enabled {
+			if err := checkAlertLimit(tx); err != nil {
+				return err
+			}
+		}
+		if created {
+			return tx.Create(&a).Error
+		}
+		a.ID = existing.ID
+		return tx.Model(&existing).Updates(map[string]any{
+			"stock_code": a.StockCode, "stock_name": a.StockName, "market": a.Market,
+			"direction": a.Direction, "price": a.Price, "note": a.Note,
+			"source": a.Source, "enabled": a.Enabled, "last_state": a.LastState,
+		}).Error
+	})
+	if err != nil && err != errAlertDuplicate {
+		a.ID = 0
+	}
+	return
+}
+
+func duplicateAlert(tx *gorm.DB, a priceAlert, exclude uint, onlyEnabled bool) (priceAlert, error) {
+	var dup priceAlert
+	query := tx.Where("stock_code = ? AND direction = ? AND price = ? AND id <> ?", a.StockCode, a.Direction, a.Price, exclude)
+	if onlyEnabled {
+		query = query.Where("enabled = ?", true)
+	}
+	err := query.Order("enabled desc, id asc").First(&dup).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		err = nil
+	}
+	return dup, err
+}
+
+func checkAlertLimit(tx *gorm.DB) error {
+	var count int64
+	if err := tx.Model(&priceAlert{}).Where("enabled = ?", true).Count(&count).Error; err != nil {
+		return err
+	}
+	if count >= maxEnabledAlerts {
+		return errAlertLimit
+	}
+	return nil
 }
 
 // applyInitialAlertState 新建规则时初始化 last_state；若当前价已在触发侧，
@@ -232,20 +309,44 @@ func deleteAlert(id int64) (string, error) {
 }
 
 func setAlertEnabled(id int64, enabled bool) (string, error) {
-	if id <= 0 {
-		return "", errors.New("无效的提醒 ID")
-	}
-	updates := map[string]any{"enabled": enabled}
-	if enabled {
-		// 重新启用时从 unknown 开始，下一次拿到行情只初始化状态，不立即误报。
-		updates["last_state"] = "unknown"
-	}
-	if err := db.Dao.Model(&priceAlert{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+	if err := writeAlertEnabled(id, enabled); err != nil {
 		return "", err
 	}
-	updateMonitorStatus(lenAlertsEnabled())
-	scheduleMonitorRefresh()
+	refreshAlertMonitor()
 	return "设置成功", nil
+}
+
+func writeAlertEnabled(id int64, enabled bool) error {
+	if id <= 0 {
+		return errAlertMissing
+	}
+	alertWriteMu.Lock()
+	defer alertWriteMu.Unlock()
+	return db.Dao.Transaction(func(tx *gorm.DB) error {
+		var a priceAlert
+		if err := tx.First(&a, id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errAlertMissing
+			}
+			return err
+		}
+		if a.Enabled == enabled {
+			return nil
+		}
+		if enabled {
+			dup, err := duplicateAlert(tx, a, a.ID, true)
+			if err != nil {
+				return err
+			}
+			if dup.ID != 0 {
+				return errAlertDuplicate
+			}
+			if err := checkAlertLimit(tx); err != nil {
+				return err
+			}
+		}
+		return tx.Model(&a).Updates(map[string]any{"enabled": enabled, "last_state": "unknown"}).Error
+	})
 }
 
 func listAlertEvents(limit int) []alertEventDTO {

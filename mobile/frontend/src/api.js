@@ -98,6 +98,7 @@ export const api = {
   // 提醒
   listAlerts: (code = '') => call('ListAlerts', code),
   saveAlert: (alert) => call('SaveAlert', alert),
+  saveAlertSuggestions: (items) => call('SaveAlertSuggestions', items),
   deleteAlert: (id) => call('DeleteAlert', Number(id)),
   setAlertEnabled: (id, enabled) => call('SetAlertEnabled', Number(id), !!enabled),
   listAlertEvents: (limit = 100) => call('ListAlertEvents', Number(limit)),
