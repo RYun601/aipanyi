@@ -173,6 +173,98 @@ func TestTradeLedgerReplay(t *testing.T) {
 	}
 }
 
+func TestTradeCanMoveEmptyBaselineBeforeFirstRecordedFill(t *testing.T) {
+	setupTradeTestDB(t)
+	at := baselineTrade(t)
+	_, err := setTradeBaseline(tradeBaselineInput{
+		Code: "sh600000", RequestID: "adjust-empty", At: at.Add(-30 * time.Minute), Quantity: 100, UnitCost: "10",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := recordTrade(tradeAt(at.Add(-10*time.Minute), "first-sell", "sell", 40, "12"))
+	if err != nil || receipt.Quantity != 60 {
+		t.Fatalf("first sell = %+v, %v", receipt, err)
+	}
+	_, strategy, _, err := tradeStrategyInputs("sh600000", at)
+	if err != nil || strategy.Sold.Quantity != 40 || strategy.Sold.NetAmount != "476.0000" {
+		t.Fatalf("today's sell = %+v, %v", strategy.Sold, err)
+	}
+}
+
+func TestTradeCanModifyEarlierSegment(t *testing.T) {
+	setupTradeTestDB(t)
+	at := baselineTrade(t)
+	prior, err := recordTrade(tradeAt(at.Add(time.Minute), "old-sale", "sell", 40, "12"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline := tradeBaselineInput{
+		Code: "sh600000", RequestID: "new-baseline", At: at.Add(2 * time.Minute), Quantity: 80, UnitCost: "9",
+	}
+	newPosition, err := setTradeBaseline(baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := priceAlert{StockCode: baseline.Code, Enabled: true, PositionRevision: &newPosition.Revision}
+	if err := db.Dao.Create(&rule).Error; err != nil {
+		t.Fatal(err)
+	}
+	history, err := listTrades(baseline.Code, 0, 30)
+	if err != nil || len(history) != 3 || history[1].ID != prior.ID || !history[1].CanCorrect {
+		t.Fatalf("earlier trade not editable: %+v, %v", history, err)
+	}
+	replacement := tradeAt(at.Add(time.Minute), "", "sell", 30, "11")
+	change := tradeCorrection{Code: baseline.Code, RequestID: "modify-old", TargetID: prior.ID, Replacement: &replacement}
+	result, err := correctTrade(change)
+	if err != nil || result.Quantity != 80 || result.AverageCost != "9.0000" {
+		t.Fatalf("old-segment correction = %+v, %v", result, err)
+	}
+	var updated priceAlert
+	if err := db.Dao.First(&updated, rule.ID).Error; err != nil || !updated.Enabled ||
+		updated.PositionRevision == nil || *updated.PositionRevision != result.Revision {
+		t.Fatalf("current alert after archive correction = %+v, %v", updated, err)
+	}
+	if _, err := recordTrade(tradeAt(at.Add(3*time.Minute), "new-sale", "sell", 10, "12")); err != nil {
+		t.Fatal(err)
+	}
+	_, strategy, _, err := tradeStrategyInputs(baseline.Code, at.Add(5*time.Minute))
+	if err != nil || strategy.Sold.Quantity != 40 || strategy.TodayRealized != "52.0000" || strategy.UnmatchedShares != 10 {
+		t.Fatalf("summary after editing an earlier segment = %+v, %v", strategy, err)
+	}
+	change.RequestID, change.TargetID = "cross-baseline", result.ID
+	replacement.At = baseline.At
+	if _, err := correctTrade(change); err == nil {
+		t.Fatal("accepted a correction across a later baseline")
+	}
+}
+
+func TestTradeCorrectionKeepsSameTimeOrder(t *testing.T) {
+	setupTradeTestDB(t)
+	at := time.Date(2026, 10, 30, 1, 30, 0, 0, time.UTC)
+	baseline := tradeBaselineInput{Code: "sh600000", RequestID: "flat", At: at, Quantity: 0, UnitCost: "0"}
+	if _, err := setTradeBaseline(baseline); err != nil {
+		t.Fatal(err)
+	}
+	filledAt := at.Add(time.Minute)
+	buy, err := recordTrade(tradeAt(filledAt, "buy-first", "buy", 100, "9"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := recordTrade(tradeAt(filledAt, "sell-next", "sell", 100, "10")); err != nil {
+		t.Fatal(err)
+	}
+	baseline.At, baseline.RequestID = filledAt, "after-same-time-fills"
+	if _, err := setTradeBaseline(baseline); err != nil {
+		t.Fatal(err)
+	}
+	replacement := tradeAt(filledAt, "", "buy", 100, "8")
+	change := tradeCorrection{Code: baseline.Code, RequestID: "correct-buy-price", TargetID: buy.ID, Replacement: &replacement}
+	if _, err := correctTrade(change); err != nil {
+		t.Fatalf("same-time correction reordered a sell before its buy: %v", err)
+	}
+}
+
 func TestTradeAtomicRetry(t *testing.T) {
 	setupTradeTestDB(t)
 	at := baselineTrade(t)

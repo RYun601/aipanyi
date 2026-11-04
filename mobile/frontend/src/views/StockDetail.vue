@@ -183,6 +183,12 @@ function openTradeCorrection(fill) {
   showTrade.value = true
 }
 
+function openHistoryBaseline(baseline) {
+  showTradeHistory.value = false
+  openBaseline()
+  editTrade.value = baseline
+}
+
 async function onTradeSaved(receipt) {
   const code = props.code
   await Promise.all([loadTradeStrategy(), loadTradeDraft()])
@@ -574,12 +580,13 @@ watch(
             </div>
             <div class="small">剩余 {{ tradePosition.quantity }} 股 · 均价 {{ tradePosition.averageCost }} · 每股净投入 {{ tradePosition.netCost }}</div>
             <div class="small">本轮净投入 {{ tradePosition.netInvested }} · 本段已实现 {{ tradePosition.realized }}</div>
-            <template v-if="tradeStrategy.bought">
+            <template v-if="tradeStrategy.bought && tradeStrategy.tradeIds?.length">
               <div class="small">今日买入 {{ tradeStrategy.bought.quantity }} 股，均价 {{ tradeStrategy.bought.averagePrice }}，净支出 {{ tradeStrategy.bought.netAmount }}</div>
               <div class="small">今日卖出 {{ tradeStrategy.sold.quantity }} 股，均价 {{ tradeStrategy.sold.averagePrice }}，净回款 {{ tradeStrategy.sold.netAmount }}</div>
               <div class="small">今日已实现 {{ tradeStrategy.todayRealized }} · 本轮回补 {{ tradeStrategy.matchedShares }} 股 · 未配对 {{ tradeStrategy.unmatchedShares }} 股</div>
               <div v-if="tradeStrategy.matchedShares" class="small">已回补净差额（含费用） {{ tradeStrategy.matchedSavings }}</div>
             </template>
+            <div v-else class="small">已保存期初持仓，当前账段暂无成交。买入或卖出需确认入账后才计入汇总。</div>
           </template>
           <div v-else class="muted" style="margin: 6px 0">可先填写买入或卖出，首次提交前需核对期初持仓。</div>
           <div v-if="pendingTrade" class="small" style="margin-top: 8px">
@@ -886,6 +893,7 @@ watch(
       :revision="tradePosition?.revision || 0"
       :highlights="tradeStrategy?.tradeIds || []"
       @edit="openTradeCorrection"
+      @edit-baseline="openHistoryBaseline"
       @saved="onTradeSaved"
     />
     <AlertEdit

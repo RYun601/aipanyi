@@ -20,7 +20,10 @@ type tradeSummary struct {
 	NetAmount    string `json:"netAmount"`
 }
 
+const tradeSummaryVersion = 1
+
 type tradeStrategyDTO struct {
+	SummaryVersion  int            `json:"summaryVersion"`
 	Position        tradeResult    `json:"position"`
 	Status          string         `json:"status"`
 	TradingDate     string         `json:"tradingDate"`
@@ -67,75 +70,117 @@ func tradeDay(code string, at time.Time) string {
 	return at.In(zone).Format("2006-01-02")
 }
 
-func summarizeTrades(position tradePosition, baseline tradeEntry, trades []tradeEntry, now time.Time) (tradeStrategyDTO, error) {
-	day := tradeDay(position.Code, now)
-	out := tradeStrategyDTO{Position: position.result(position.BaselineID), TradingDate: day, Status: "pending",
-		TradeIDs: []int64{}}
-	state, err := replayTradePosition(baseline, nil)
-	if err != nil {
-		return out, err
+type tradeSegment struct {
+	baseline tradeEntry
+	fills    []tradeEntry
+}
+
+func tradeSegments(tx *gorm.DB, code string, currentBaselineID int64) ([]tradeSegment, error) {
+	var rows []tradeEntry
+	if err := tx.Select("id", "code", "baseline_id", "kind", "target_id", "at", "side", "quantity", "price", "fee").
+		Where("code = ?", code).Order("id").Find(&rows).Error; err != nil {
+		return nil, err
 	}
+	var segments []tradeSegment
+	fills := make(map[int64][]tradeEntry)
+	found := false
+	for _, row := range rows {
+		if row.Kind == "baseline" {
+			segments = append(segments, tradeSegment{baseline: row})
+			found = found || row.ID == currentBaselineID
+		} else {
+			fills[row.BaselineID] = append(fills[row.BaselineID], row)
+		}
+	}
+	if !found {
+		return nil, errors.New("找不到当前持仓的期初记录")
+	}
+	for i := range segments {
+		segments[i].fills = activeTrades(fills[segments[i].baseline.ID])
+	}
+	return segments, nil
+}
+
+func summarizeTrades(position tradePosition, segments []tradeSegment, now time.Time) (tradeStrategyDTO, error) {
+	day := tradeDay(position.Code, now)
+	out := tradeStrategyDTO{SummaryVersion: tradeSummaryVersion, Position: position.result(position.BaselineID),
+		TradingDate: day, Status: "pending", TradeIDs: []int64{}}
 	type soldLot struct{ shares, proceeds int64 }
 	var openSales []soldLot
 	var cycleIDs, todayIDs []int64
 	var bought, sold tradeTotals
 	var todayRealized, savings int64
-	for _, fill := range trades {
-		wasFlat := state.Quantity == 0
-		realized, err := state.applyFill(fill)
+	for _, segment := range segments {
+		current := segment.baseline.ID == position.BaselineID
+		state, err := replayTradePosition(segment.baseline, nil)
 		if err != nil {
 			return out, err
 		}
-		if wasFlat && fill.Side == "buy" {
-			cycleIDs, openSales = nil, nil
-			out.MatchedShares, savings = 0, 0
-		}
-		cycleIDs = append(cycleIDs, fill.ID)
-		today := tradeDay(position.Code, fill.At) == day
-		if today {
-			todayIDs = append(todayIDs, fill.ID)
-		}
-		amount, _ := tradeProduct(fill.Price, fill.Quantity)
-		if fill.Side == "sell" {
-			net := amount - fill.Fee
+		for _, fill := range segment.fills {
+			wasFlat := state.Quantity == 0
+			realized, err := state.applyFill(fill)
+			if err != nil {
+				return out, err
+			}
+			if current && wasFlat && fill.Side == "buy" {
+				cycleIDs, openSales = nil, nil
+				out.MatchedShares, savings = 0, 0
+			}
+			if current {
+				cycleIDs = append(cycleIDs, fill.ID)
+			}
+			today := tradeDay(position.Code, fill.At) == day
 			if today {
-				todayRealized += realized
-				if !sold.add(fill.Quantity, amount, net) || !checkedTradeMoney(todayRealized) {
+				todayIDs = append(todayIDs, fill.ID)
+			}
+			amount, _ := tradeProduct(fill.Price, fill.Quantity)
+			if fill.Side == "sell" {
+				net := amount - fill.Fee
+				if today {
+					todayRealized += realized
+					if !sold.add(fill.Quantity, amount, net) || !checkedTradeMoney(todayRealized) {
+						return out, errTradeOverflow
+					}
+				}
+				if !current {
+					continue
+				}
+				if state.Quantity == 0 {
+					openSales = nil // 清仓后再次买入属于新一轮持仓。
+				} else {
+					openSales = append(openSales, soldLot{fill.Quantity, net})
+				}
+				continue
+			}
+			cost := amount + fill.Fee
+			if today && !bought.add(fill.Quantity, amount, cost) {
+				return out, errTradeOverflow
+			}
+			if !current {
+				continue
+			}
+			for shares := fill.Quantity; shares > 0 && len(openSales) > 0; {
+				lot := &openSales[0]
+				matched := min(lot.shares, shares)
+				allocatedProceeds := proportionalTradeMoney(lot.proceeds, matched, lot.shares)
+				allocatedCost := proportionalTradeMoney(cost, matched, shares)
+				difference := allocatedProceeds - allocatedCost
+				if !checkedTradeMoney(difference) {
 					return out, errTradeOverflow
 				}
-			}
-			if state.Quantity == 0 {
-				openSales = nil // 清仓后再次买入属于新一轮持仓。
-			} else {
-				openSales = append(openSales, soldLot{fill.Quantity, net})
-			}
-			continue
-		}
-		cost := amount + fill.Fee
-		if today && !bought.add(fill.Quantity, amount, cost) {
-			return out, errTradeOverflow
-		}
-		for shares := fill.Quantity; shares > 0 && len(openSales) > 0; {
-			lot := &openSales[0]
-			matched := min(lot.shares, shares)
-			allocatedProceeds := proportionalTradeMoney(lot.proceeds, matched, lot.shares)
-			allocatedCost := proportionalTradeMoney(cost, matched, shares)
-			difference := allocatedProceeds - allocatedCost
-			if !checkedTradeMoney(difference) {
-				return out, errTradeOverflow
-			}
-			savings += difference
-			if !checkedTradeMoney(savings) {
-				return out, errTradeOverflow
-			}
-			if out.MatchedShares > maxTradeShares-matched {
-				return out, errTradeOverflow
-			}
-			out.MatchedShares += matched
-			shares, cost = shares-matched, cost-allocatedCost
-			lot.shares, lot.proceeds = lot.shares-matched, lot.proceeds-allocatedProceeds
-			if lot.shares == 0 {
-				openSales = openSales[1:]
+				savings += difference
+				if !checkedTradeMoney(savings) {
+					return out, errTradeOverflow
+				}
+				if out.MatchedShares > maxTradeShares-matched {
+					return out, errTradeOverflow
+				}
+				out.MatchedShares += matched
+				shares, cost = shares-matched, cost-allocatedCost
+				lot.shares, lot.proceeds = lot.shares-matched, lot.proceeds-allocatedProceeds
+				if lot.shares == 0 {
+					openSales = openSales[1:]
+				}
 			}
 		}
 	}
@@ -173,11 +218,11 @@ func tradeStrategyInputs(code string, now time.Time) (tradePosition, tradeStrate
 			summary.Status = "no_baseline"
 			return nil
 		}
-		baseline, rows, err := currentTradeRows(tx, pos)
+		segments, err := tradeSegments(tx, code, pos.BaselineID)
 		if err != nil {
 			return err
 		}
-		summary, err = summarizeTrades(pos, baseline, activeTrades(rows), now)
+		summary, err = summarizeTrades(pos, segments, now)
 		if err != nil {
 			return err
 		}
@@ -221,7 +266,7 @@ func getTradeStrategy(code string, now time.Time) (tradeStrategyDTO, bool, error
 	}
 	var cached tradeStrategyDTO
 	if !position.Pending && json.Unmarshal([]byte(position.StrategyJSON), &cached) == nil &&
-		cached.Position.Revision == position.Revision && cached.TradingDate == tradeDay(code, now) {
+		cached.SummaryVersion == tradeSummaryVersion && cached.Position.Revision == position.Revision && cached.TradingDate == tradeDay(code, now) {
 		maxAge := 2 * monitorPollInterval()
 		needsRefresh := cached.EvaluatedAt == nil || now.Sub(*cached.EvaluatedAt) > maxAge || cached.EvaluatedAt.After(now)
 		if !needsRefresh {

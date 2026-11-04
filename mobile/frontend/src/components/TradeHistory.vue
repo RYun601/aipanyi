@@ -9,7 +9,7 @@ const props = defineProps({
   revision: { type: Number, default: 0 },
   highlights: { type: Array, default: () => [] }
 })
-const emit = defineEmits(['update:show', 'edit', 'saved'])
+const emit = defineEmits(['update:show', 'edit', 'edit-baseline', 'saved'])
 const records = ref([])
 const more = ref(false)
 const loading = ref(false)
@@ -78,10 +78,10 @@ async function voidFill(fill) {
 }
 
 function recordLabel(item) {
-  if (item.kind === 'baseline') return '核对期初'
+  if (item.kind === 'baseline') return '期初持仓'
   if (item.kind === 'void') return '撤销 #' + item.targetId
   const side = item.side === 'buy' ? '买入' : '卖出'
-  return item.kind === 'replace' ? '更正 #' + item.targetId + ' · ' + side : side
+  return item.kind === 'replace' ? '修改 #' + item.targetId + ' · ' + side : side
 }
 </script>
 
@@ -97,17 +97,21 @@ function recordLabel(item) {
       <div v-for="item in records" :key="item.id" class="card">
         <div class="row">
           <b>#{{ item.id }} {{ recordLabel(item) }}</b>
-          <span v-if="item.superseded" class="tag-mini">已更正或撤销</span>
+          <span v-if="item.superseded" class="tag-mini">已修改或撤销</span>
           <span v-else-if="highlights.includes(item.id)" class="tag-mini">策略依据</span>
         </div>
-        <div v-if="item.kind !== 'void'" class="small">{{ item.quantity }} 股 × {{ item.price }} · 费用 {{ item.fee }}</div>
+        <div v-if="item.kind === 'baseline'" class="small">{{ item.quantity }} 股 · 单位成本 {{ item.price }} · 期初核对</div>
+        <div v-else-if="item.kind !== 'void'" class="small">{{ item.quantity }} 股 × {{ item.price }} · 费用 {{ item.fee }}</div>
         <div class="muted">{{ new Date(item.at || item.recordedAt).toLocaleString() }}</div>
         <div v-if="item.note" class="muted">{{ item.note }}</div>
         <div v-if="item.alertEventId" class="muted">来源提醒 #{{ item.alertEventId }}</div>
         <div v-if="item.canCorrect" style="margin-top: 6px">
-          <van-button size="small" plain :disabled="voiding || !!uncertain" @click="emit('edit', item)">更正</van-button>
+          <van-button size="small" plain :disabled="voiding || !!uncertain" @click="emit('edit', item)">修改</van-button>
           <van-button size="small" plain :disabled="voiding || !!uncertain" @click="voidFill(item)">撤销</van-button>
         </div>
+        <van-button v-if="item.canAdjustBaseline" size="small" plain :disabled="voiding || !!uncertain" @click="emit('edit-baseline', item)">
+          修改期初
+        </van-button>
       </div>
       <van-button v-if="uncertain" block type="primary" :loading="voiding" @click="voidFill(null)">重试撤销</van-button>
       <van-button v-if="more || loading" block plain :loading="loading" @click="load(false)">加载更多</van-button>

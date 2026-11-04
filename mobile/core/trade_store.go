@@ -190,20 +190,22 @@ type tradeResult struct {
 }
 
 type tradeDTO struct {
-	ID           int64      `json:"id"`
-	Kind         string     `json:"kind"`
-	BaselineID   int64      `json:"baselineId"`
-	TargetID     int64      `json:"targetId"`
-	Side         string     `json:"side"`
-	At           *time.Time `json:"at"`
-	RecordedAt   time.Time  `json:"recordedAt"`
-	Quantity     int64      `json:"quantity"`
-	Price        string     `json:"price"`
-	Fee          string     `json:"fee"`
-	Note         string     `json:"note"`
-	AlertEventID int64      `json:"alertEventId"`
-	CanCorrect   bool       `json:"canCorrect"`
-	Superseded   bool       `json:"superseded"`
+	ID                int64      `json:"id"`
+	Kind              string     `json:"kind"`
+	BaselineID        int64      `json:"baselineId"`
+	TargetID          int64      `json:"targetId"`
+	Side              string     `json:"side"`
+	At                *time.Time `json:"at"`
+	RecordedAt        time.Time  `json:"recordedAt"`
+	Quantity          int64      `json:"quantity"`
+	Price             string     `json:"price"`
+	Fee               string     `json:"fee"`
+	Note              string     `json:"note"`
+	AlertEventID      int64      `json:"alertEventId"`
+	CanCorrect        bool       `json:"canCorrect"`
+	PastSegment       bool       `json:"pastSegment,omitempty"`
+	CanAdjustBaseline bool       `json:"canAdjustBaseline,omitempty"`
+	Superseded        bool       `json:"superseded"`
 }
 
 func parseTradeMoney(raw string) (int64, error) {
@@ -401,18 +403,30 @@ func applyTrade(entry tradeEntry, preview bool) (tradeResult, error) {
 		if entry.ExpectedRevision != nil && *entry.ExpectedRevision != cur.Revision {
 			return errors.New("持仓已更新，请重新预览")
 		}
+		if entry.Kind != "baseline" {
+			entry.BaselineID = cur.BaselineID
+		}
+		if entry.TargetID != 0 {
+			var original tradeEntry
+			err := tx.Where("code = ? AND kind IN ?", entry.Code, []string{"fill", "replace"}).
+				First(&original, entry.TargetID).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("原成交记录不存在")
+			}
+			if err != nil {
+				return err
+			}
+			entry.BaselineID = original.BaselineID
+		}
 		next, err := calculateTrade(tx, entry, cur)
 		if err != nil {
 			return err
 		}
 		next.Revision, next.Pending = cur.Revision+1, true
+		next.StrategyJSON, next.EvaluatedAt = "", 0
 		if preview {
 			result = next.result(0)
 			return nil
-		}
-		entry.BaselineID = cur.BaselineID
-		if entry.Kind == "baseline" {
-			entry.BaselineID = 0
 		}
 		if err := tx.Create(&entry).Error; err != nil {
 			return err
@@ -437,7 +451,13 @@ func applyTrade(entry tradeEntry, preview bool) (tradeResult, error) {
 		if err := writeFollowedPosition(tx, next); err != nil {
 			return err
 		}
-		if err := invalidatePositionAlerts(tx, next); err != nil {
+		if entry.TargetID != 0 && entry.BaselineID != cur.BaselineID {
+			// The current reconciliation still describes the same holdings after an archived correction.
+			if err := tx.Model(&priceAlert{}).Where("stock_code = ? AND position_revision = ?", cur.Code, cur.Revision).
+				UpdateColumn("position_revision", next.Revision).Error; err != nil {
+				return err
+			}
+		} else if err := invalidatePositionAlerts(tx, next); err != nil {
 			return err
 		}
 		result = next.result(entry.ID)
@@ -483,59 +503,85 @@ func calculateTrade(tx *gorm.DB, entry tradeEntry, current tradePosition) (trade
 	if entry.Kind == "baseline" {
 		if current.BaselineID > 0 {
 			var latest tradeEntry
-			if err := tx.Where("id = ? OR (baseline_id = ? AND kind <> ?)", current.BaselineID, current.BaselineID, "void").
-				Order("at DESC, id DESC").First(&latest).Error; err != nil {
+			err := tx.Where("code = ? AND kind IN ?", entry.Code, []string{"fill", "replace"}).
+				Order("at DESC, id DESC").First(&latest).Error
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 				return current, err
 			}
-			if entry.At.Before(latest.At) {
+			if err == nil && entry.At.Before(latest.At) {
 				return current, errors.New("新期初不能早于上一段账本的最新成交")
 			}
 		}
 		return replayTradePosition(entry, nil)
 	}
-	if current.BaselineID == 0 {
+	if entry.BaselineID == 0 {
 		return current, errTradeBaseline
 	}
-	baseline, rows, err := currentTradeRows(tx, current)
+	baseline, rows, err := tradeRowsForBaseline(tx, entry.Code, entry.BaselineID)
 	if err != nil {
 		return current, err
 	}
 	if entry.Kind != "void" && entry.At.Before(baseline.At) {
-		return current, errors.New("成交时间不能早于期初")
+		return current, errors.New("成交时间早于期初。若这只股票尚无正式成交，可先调整对账期初")
 	}
+	var originalAt time.Time
 	if entry.TargetID != 0 {
 		found := false
 		for _, row := range activeTrades(rows) {
 			if row.ID == entry.TargetID {
 				found = true
+				originalAt = row.At
 				break
 			}
 		}
 		if !found {
-			return current, errors.New("成交已更正、已撤销或不在当前账本中")
+			return current, errors.New("成交已修改或撤销，请选择最新记录")
+		}
+	}
+	pastSegment := entry.BaselineID != current.BaselineID
+	if pastSegment && entry.Kind != "void" {
+		var nextBaseline tradeEntry
+		if err := tx.Where("code = ? AND kind = ? AND id > ?", entry.Code, "baseline", entry.BaselineID).
+			Order("id").First(&nextBaseline).Error; err != nil {
+			return current, err
+		}
+		if !entry.At.Before(nextBaseline.At) && !entry.At.Equal(originalAt) {
+			return current, errors.New("修改后的成交时间应早于下一段对账期初")
 		}
 	}
 	// Preview and commit both put a new row last when execution times tie.
 	entry.ID = 1<<63 - 1
 	rows = append(rows, entry)
 	next, err := replayTradePosition(baseline, activeTrades(rows))
+	if pastSegment {
+		// A subsequent reconciliation is an independent snapshot of actual holdings.
+		return current, err
+	}
 	next.BaselineID = current.BaselineID
 	return next, err
 }
 
-func currentTradeRows(tx *gorm.DB, current tradePosition) (tradeEntry, []tradeEntry, error) {
+func tradeRowsForBaseline(tx *gorm.DB, code string, baselineID int64) (tradeEntry, []tradeEntry, error) {
 	var baseline tradeEntry
 	var rows []tradeEntry
-	if err := tx.First(&baseline, current.BaselineID).Error; err != nil {
+	if err := tx.First(&baseline, baselineID).Error; err != nil {
 		return baseline, nil, err
 	}
-	err := tx.Where("baseline_id = ? AND code = ?", current.BaselineID, current.Code).Order("id").Find(&rows).Error
+	err := tx.Where("baseline_id = ? AND code = ?", baselineID, code).Order("id").Find(&rows).Error
 	return baseline, rows, err
 }
 
 func activeTrades(rows []tradeEntry) []tradeEntry {
 	superseded := make(map[int64]bool)
+	byID := make(map[int64]tradeEntry, len(rows))
+	order := make(map[int64]int64, len(rows))
 	for _, row := range rows {
+		order[row.ID] = row.ID
+		if previous, ok := byID[row.TargetID]; ok && previous.At.Equal(row.At) {
+			// A correction to price, quantity or fees keeps the original position among equal timestamps.
+			order[row.ID] = order[previous.ID]
+		}
+		byID[row.ID] = row
 		if row.TargetID != 0 {
 			superseded[row.TargetID] = true
 		}
@@ -548,7 +594,7 @@ func activeTrades(rows []tradeEntry) []tradeEntry {
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].At.Equal(out[j].At) {
-			return out[i].ID < out[j].ID
+			return order[out[i].ID] < order[out[j].ID]
 		}
 		return out[i].At.Before(out[j].At)
 	})
@@ -628,6 +674,17 @@ func listTrades(code string, beforeID int64, limit int) ([]tradeDTO, error) {
 	if err := query.Order("id DESC").Limit(limit).Find(&rows).Error; err != nil {
 		return nil, err
 	}
+	var canAdjustBaseline bool
+	for _, row := range rows {
+		if row.Kind == "baseline" && row.ID == cur.BaselineID {
+			var count int64
+			if err := db.Dao.Model(&tradeEntry{}).Where("code = ? AND kind IN ?", norm, []string{"fill", "replace"}).Count(&count).Error; err != nil {
+				return nil, err
+			}
+			canAdjustBaseline = count == 0
+			break
+		}
+	}
 	ids := make([]int64, 0, len(rows))
 	for _, row := range rows {
 		ids = append(ids, row.ID)
@@ -651,7 +708,9 @@ func listTrades(code string, beforeID int64, limit int) ([]tradeDTO, error) {
 		result = append(result, tradeDTO{ID: row.ID, Kind: row.Kind, BaselineID: row.BaselineID, TargetID: row.TargetID,
 			Side: row.Side, At: at, RecordedAt: row.CreatedAt, Quantity: row.Quantity, Price: formatTradeMoney(row.Price),
 			Fee: formatTradeMoney(row.Fee), Note: row.Note, AlertEventID: row.AlertEventID, Superseded: superseded[row.ID],
-			CanCorrect: row.BaselineID == cur.BaselineID && (row.Kind == "fill" || row.Kind == "replace") && !superseded[row.ID]})
+			CanCorrect:        (row.Kind == "fill" || row.Kind == "replace") && !superseded[row.ID],
+			PastSegment:       row.BaselineID != 0 && row.BaselineID != cur.BaselineID,
+			CanAdjustBaseline: row.Kind == "baseline" && row.ID == cur.BaselineID && canAdjustBaseline})
 	}
 	return result, nil
 }

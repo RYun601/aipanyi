@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { showConfirmDialog, showToast } from 'vant'
 import { api, submitTradeDraft } from '../api'
 import { estimateTradeFee } from '../tradeFee'
@@ -19,6 +19,7 @@ const form = reactive({})
 const saving = ref(false)
 const uncertain = ref(null)
 const firstBaseline = ref(false)
+const firstFillPending = ref(false)
 const verifiedPosition = ref(null)
 const feeRules = ref(null)
 const feeEstimate = computed(() => estimateTradeFee({
@@ -29,7 +30,7 @@ const currentFeeRule = computed(() => feeRules.value?.[form.side])
 const position = computed(() => props.position || (verifiedPosition.value?.revision ? verifiedPosition.value : null))
 const isBaseline = computed(() => props.baseline || firstBaseline.value)
 const needsBaseline = computed(() => !isBaseline.value && !props.fill && !position.value)
-const title = computed(() => isBaseline.value ? '核对期初持仓' : props.fill ? '更正成交' : '记录成交')
+const title = computed(() => isBaseline.value ? '核对期初持仓' : props.fill ? '修改成交' : '记录成交')
 const submitLabel = computed(() => {
   if (uncertain.value) return '重试提交'
   if (isBaseline.value) return '预览期初'
@@ -60,6 +61,7 @@ watch(() => props.show, async (open) => {
   const request = ++feeRateRequest
   if (!open || uncertain.value) return
   firstBaseline.value = false
+  firstFillPending.value = false
   verifiedPosition.value = null
   fillDraft = null
   feeRules.value = null
@@ -108,6 +110,9 @@ function makeRequest() {
   }
   const base = { requestId: form.requestId, code: props.code }
   if (isBaseline.value) {
+    if (firstBaseline.value && at.getTime() >= Date.parse(fillDraft.at)) {
+      throw new Error('期初时间要早于刚才填写的成交时间')
+    }
     return { kind: 'baseline', input: { ...base, at: at.toISOString(), quantity, unitCost: form.price } }
   }
   if (quantity === 0) throw new Error('成交股数必须大于 0')
@@ -131,6 +136,7 @@ async function save() {
   if (saving.value) return
   saving.value = true
   let submitted = false
+  let confirmFirstFill = false
   let request
   try {
     request = uncertain.value
@@ -147,12 +153,16 @@ async function save() {
       }
       const preview = await calls[request.kind](request.input)
       const before = position.value?.quantity ?? props.legacyVolume
+      const fill = request.kind === 'correction' ? request.input.replacement : request.kind === 'fill' ? request.input : null
+      const direction = fill?.side === 'sell' ? '卖出' : '买入'
+      const details = fill ? direction + ' ' + fill.quantity + ' 股 × ' + fill.price + '，费用 ' + fill.fee + '\n'
+        : firstBaseline.value ? '保存期初后，接下来还需确认成交入账。\n' : ''
       try {
         await showConfirmDialog({
-          title: title.value,
-          message: '股数 ' + before + ' → ' + preview.quantity +
+          title: fill ? (request.kind === 'correction' ? '确认修改成交' : '确认' + direction) : title.value,
+          message: details + '股数 ' + before + ' → ' + preview.quantity +
             '\n剩余持仓均价 ' + preview.averageCost + '\n每股净投入 ' + preview.netCost,
-          confirmButtonText: isBaseline.value ? '保存期初' : '确认入账'
+          confirmButtonText: firstBaseline.value ? '保存期初并继续' : isBaseline.value ? '保存期初' : '确认入账'
         })
       } catch {
         return
@@ -165,13 +175,14 @@ async function save() {
     if (firstBaseline.value) {
       verifiedPosition.value = result
       returnToFill()
+      firstFillPending.value = true
       emit('saved', result)
-      showToast('期初已保存，请继续确认成交')
+      confirmFirstFill = true
       return
     }
     emit('saved', result)
     emit('update:show', false)
-    showToast(isBaseline.value ? '期初已保存' : '已入账')
+    showToast(request.kind === 'baseline' ? '期初已保存' : request.kind === 'correction' ? '成交修改已保存' : '成交已入账')
   } catch (error) {
     if (submitted && (!error.status || error.status >= 500)) {
       uncertain.value = request
@@ -182,6 +193,10 @@ async function save() {
     }
   } finally {
     saving.value = false
+    if (confirmFirstFill) {
+      await nextTick()
+      if (props.show) await save()
+    }
   }
 }
 </script>
@@ -191,11 +206,14 @@ async function save() {
     @update:show="(open) => { if (!open && !uncertain) close() }">
     <div class="sheet">
       <div class="sheet-title">{{ title }}</div>
-      <p v-if="firstBaseline" class="muted">请核对这笔成交前的股数和单位成本。保存期初后，会回到刚才填写的成交。</p>
+      <p v-if="firstBaseline" class="muted">请核对这笔成交前的股数和单位成本。保存期初后会直接打开成交确认。</p>
       <p v-else-if="isBaseline" class="muted">期初应早于首笔成交。新增对账期初会开启新一段账本，旧记录可在历史中查看。</p>
-      <p v-else-if="fill" class="muted">原记录将保留，并关联本次更正。</p>
+      <p v-else-if="fill" class="muted">
+        {{ fill.pastSegment ? '将重算这笔成交及当天汇总。后续对账期初仍作为新账段的起点。' : '保存后会按修改后的成交重算持仓。原记录保留供核对。' }}
+      </p>
       <p v-else-if="alertEventId" class="muted">关联提醒 #{{ alertEventId }}</p>
       <p v-if="needsBaseline" class="muted">首次记账可先填成交，提交前再核对期初持仓。</p>
+      <p v-if="firstFillPending" class="muted">期初已保存，这笔成交还没入账。请核对后确认入账。</p>
       <van-cell-group :aria-busy="saving">
         <van-field v-if="!isBaseline" label="方向" :disabled="saving || !!uncertain">
           <template #input>
