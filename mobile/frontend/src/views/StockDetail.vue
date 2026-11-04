@@ -39,7 +39,6 @@ const strategyText = {
 }
 let tradeLoadId = 0
 let offTrade = null
-let openFillAfterBaseline = false
 
 const detail = ref(null)
 const loading = ref(true)
@@ -167,15 +166,13 @@ async function loadTradeStrategy(force = false) {
 
 function openFill() {
   editTrade.value = null
-  editBaseline.value = !tradePosition.value
-  openFillAfterBaseline = editBaseline.value
+  editBaseline.value = false
   showTrade.value = true
 }
 
 function openBaseline() {
   editTrade.value = null
   editBaseline.value = true
-  openFillAfterBaseline = false
   showTrade.value = true
 }
 
@@ -183,25 +180,17 @@ function openTradeCorrection(fill) {
   showTradeHistory.value = false
   editTrade.value = fill
   editBaseline.value = false
-  openFillAfterBaseline = false
   showTrade.value = true
 }
 
 async function onTradeSaved(receipt) {
   const code = props.code
-  const afterBaseline = openFillAfterBaseline && editBaseline.value
-  openFillAfterBaseline = false
   await Promise.all([loadTradeStrategy(), loadTradeDraft()])
   if (code !== props.code) return
   const current = tradePosition.value || receipt
   if (detail.value?.item) {
     detail.value.item.costPrice = Number(current.averageCost)
     detail.value.item.volume = current.quantity
-  }
-  if (afterBaseline) {
-    editBaseline.value = false
-    editTrade.value = null
-    showTrade.value = true
   }
   load()
 }
@@ -517,7 +506,6 @@ watch(
     pendingTrade.value = null
     showTrade.value = false
     showTradeHistory.value = false
-    openFillAfterBaseline = false
     loadTradeStrategy()
     loadTradeDraft()
     load()
@@ -593,7 +581,7 @@ watch(
               <div v-if="tradeStrategy.matchedShares" class="small">已回补净差额（含费用） {{ tradeStrategy.matchedSavings }}</div>
             </template>
           </template>
-          <div v-else class="muted" style="margin: 6px 0">核对期初后，可以记录实际成交并更新策略。</div>
+          <div v-else class="muted" style="margin: 6px 0">可先填写买入或卖出，首次提交前需核对期初持仓。</div>
           <div v-if="pendingTrade" class="small" style="margin-top: 8px">
             有一笔提交待核对
             <van-button size="small" plain :loading="restoringTrade" @click="restoreTradeDraft">恢复上次提交</van-button>
