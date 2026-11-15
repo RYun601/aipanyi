@@ -7,6 +7,23 @@ import org.junit.Test
 
 class CoreUrlTest {
     @Test
+    fun backHistoryOnlyUsesTheVerifiedOrigin() {
+        val current = "http://127.0.0.1:40213/#/stock/sh600519"
+        assertTrue(CoreUrl.sameOrigin(current, "http://127.0.0.1:40213/#/watchlist"))
+        assertFalse(CoreUrl.sameOrigin(current, "http://127.0.0.1:37735/#/watchlist"))
+        assertFalse(CoreUrl.sameOrigin(current, "about:blank"))
+        assertFalse(CoreUrl.sameOrigin(null, "http://127.0.0.1:40213/#/watchlist"))
+    }
+
+    @Test
+    fun mainFrameErrorCanOmitTheRoute() {
+        val current = "http://127.0.0.1:40213/#/stock/sh600519"
+        assertTrue(CoreUrl.matchesDocument(current, "http://127.0.0.1:40213/"))
+        assertFalse(CoreUrl.matchesDocument(current, "http://127.0.0.1:37735/"))
+        assertFalse(CoreUrl.matchesDocument(current, "http://127.0.0.1:40213/assets/logo.png"))
+    }
+
+    @Test
     fun staleNotificationNavigationDoesNotCompleteNewTarget() {
         val expected = "http://127.0.0.1:40213/#/stock/sh600000?eventId=42"
         assertFalse(CoreUrl.matchesNavigation(expected, "http://127.0.0.1:40213/#/stock/sh600519?eventId=41"))

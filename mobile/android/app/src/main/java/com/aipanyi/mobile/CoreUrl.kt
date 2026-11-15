@@ -22,9 +22,16 @@ object CoreUrl {
         return if (route.isNullOrBlank()) "$base/" else "$base/#$route"
     }
 
+    fun sameOrigin(first: String?, second: String?): Boolean {
+        val firstOrigin = origin(first) ?: return false
+        return firstOrigin == origin(second)
+    }
+
+    fun matchesDocument(expected: String?, actual: String?): Boolean =
+        sameOrigin(expected, actual) && expected?.substringBefore('#') == actual?.substringBefore('#')
+
     fun matchesNavigation(expected: String?, finished: String?): Boolean {
-        if (expected == null || finished == null || origin(expected) == null || origin(expected) != origin(finished)) return false
-        if (expected.substringBefore('#') != finished.substringBefore('#')) return false
+        if (expected == null || finished == null || !matchesDocument(expected, finished)) return false
         val route = expected.substringAfter('#', "")
         return route.isEmpty() || route == finished.substringAfter('#', "")
     }
