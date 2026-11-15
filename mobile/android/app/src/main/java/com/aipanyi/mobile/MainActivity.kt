@@ -110,18 +110,19 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                if (matchesLoading(url)) {
+                if (visible && CoreUrl.matchesDocument(loadingUrl, url)) {
                     progress.visibility = View.VISIBLE
                     errorView.visibility = View.GONE
                 }
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
-                if (!navigationFailed && CoreUrl.matchesNavigation(loadingUrl, url)) completeNavigation(url!!)
+                if (visible && !navigationFailed && CoreUrl.matchesNavigation(loadingUrl, url)) completeNavigation(url!!)
             }
 
             override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
-                if (!navigationFailed && loadingUrl == null && CoreUrl.origin(url)?.let { it == CoreUrl.origin(lastGoodUrl) } == true) {
+                if (!visible) return
+                if (!navigationFailed && loadingUrl == null && CoreUrl.sameOrigin(url, lastGoodUrl)) {
                     lastGoodUrl = url
                 }
                 // 同一文档的 hash 导航有时不会收到 onPageFinished。
@@ -137,8 +138,8 @@ class MainActivity : AppCompatActivity() {
                 error: WebResourceError?
             ) {
                 val url = request?.url?.toString()
-                if (request?.isForMainFrame == true &&
-                    (matchesLoading(url) || (loadingUrl == null && url == lastGoodUrl))) {
+                val expected = loadingUrl ?: lastGoodUrl.takeUnless { navigationFailed }
+                if (request?.isForMainFrame == true && CoreUrl.matchesDocument(expected, url)) {
                     RuntimeLog.warn(TAG, "navigation failed origin=${CoreUrl.origin(url)} error=${error?.errorCode}")
                     navigationFailed = true
                     loadingUrl = null
@@ -150,6 +151,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestConnection(recoverOrigin: String? = null) {
+        cancelPendingNavigation()
         val id = java.util.UUID.randomUUID().toString()
         requestId = id
         requestStarted = android.os.SystemClock.elapsedRealtime()
@@ -239,11 +241,9 @@ class MainActivity : AppCompatActivity() {
         webView.loadUrl(target)
     }
 
-    private fun matchesLoading(url: String?): Boolean =
-        url != null && loadingUrl != null && CoreUrl.origin(url) == CoreUrl.origin(loadingUrl) &&
-            url.substringBefore('#') == loadingUrl?.substringBefore('#')
-
     private fun completeNavigation(url: String) {
+        if (loadingDocument && lastGoodUrl != null) webView.clearHistory()
+        loadingDocument = false
         lastGoodUrl = url
         loadingUrl = null
         if (loadingStockCode == pendingStockCode && loadingEventId == pendingEventId) {
@@ -254,6 +254,14 @@ class MainActivity : AppCompatActivity() {
         requestId = null
         progress.visibility = View.GONE
         RuntimeLog.info(TAG, "navigation ready origin=${CoreUrl.origin(url)} elapsedMs=${android.os.SystemClock.elapsedRealtime() - requestStarted}")
+    }
+
+    private fun cancelPendingNavigation() {
+        if (loadingUrl == null) return
+        loadingUrl = null
+        loadingDocument = false
+        navigationFailed = true
+        webView.stopLoading()
     }
 
     private fun readTarget(intent: Intent?) {
@@ -391,6 +399,7 @@ class MainActivity : AppCompatActivity() {
         visible = false
         requestId = null
         handler.removeCallbacks(coreTimeout)
+        cancelPendingNavigation()
         if (exiting || isChangingConfigurations) return
         // 不要把调度状态读回主进程：SharedPreferences 跨进程缓存可能过期。
         // 只通知“UI 不可见”，由 :monitor 进程里的服务按自己新鲜的调度决定是否停止。
@@ -450,11 +459,15 @@ class MainActivity : AppCompatActivity() {
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
-        if (this::webView.isInitialized && webView.canGoBack()) {
-            webView.goBack()
-        } else {
-            super.onBackPressed()
+        if (this::webView.isInitialized && !navigationFailed && loadingUrl == null && webView.canGoBack()) {
+            val history = webView.copyBackForwardList()
+            val previousUrl = history.getItemAtIndex(history.currentIndex - 1)?.url
+            if (CoreUrl.sameOrigin(lastGoodUrl, previousUrl)) {
+                webView.goBack()
+                return
+            }
         }
+        super.onBackPressed()
     }
 
     override fun onDestroy() {
