@@ -55,6 +55,8 @@ const showAlertEdit = ref(false)
 const editingAlert = ref(null)
 const showSuggestions = ref(false)
 const suggestions = ref([])
+const suggestionsChatId = ref('')
+const consumedSuggestionChatId = ref('')
 const showAnalysisSheet = ref(false)
 const analysisPrompts = ref([])
 const selectedPromptId = ref(0)
@@ -195,7 +197,7 @@ async function onTradeSaved(receipt) {
   if (code !== props.code) return
   const current = tradePosition.value || receipt
   if (detail.value?.item) {
-    detail.value.item.costPrice = Number(current.averageCost)
+    detail.value.item.costPrice = Number(current.netCost)
     detail.value.item.volume = current.quantity
   }
   load()
@@ -335,6 +337,7 @@ async function confirmStartAnalysis() {
   running.value = true
   draft.value = ''
   reasoning.value = ''
+  resetSuggestionCache()
   try {
     await api.startAnalysis(
       props.code,
@@ -454,7 +457,24 @@ async function removeAlert(a) {
   }
 }
 
+function resetSuggestionCache() {
+  suggestions.value = []
+  suggestionsChatId.value = ''
+}
+
+// 分析结束后后台可能已经提取过一份建议；只有它仍对应当前分析结果时才复用，
+// 避免用户点“从分析中提取提醒”时再调用一次 AI。
+function cachedSuggestionsReady() {
+  if (!suggestions.value.length) return false
+  const currentChatId = savedAnalysis.value?.chatId || ''
+  return !suggestionsChatId.value || !currentChatId || suggestionsChatId.value === currentChatId
+}
+
 async function extractAlerts() {
+  if (cachedSuggestionsReady()) {
+    showSuggestions.value = true
+    return
+  }
   try {
     const data = await api.extractAlerts(props.code)
     const list = Array.isArray(data) ? data : []
@@ -463,10 +483,19 @@ async function extractAlerts() {
       return
     }
     suggestions.value = list
+    suggestionsChatId.value = savedAnalysis.value?.chatId || ''
     showSuggestions.value = true
   } catch (e) {
     showToast(e?.message || '提取提醒失败')
   }
+}
+
+function onSuggestionsSaved() {
+  // 已确认过的建议不再作为“待查看”缓存，避免保存后再次弹出旧内容。
+  const chatId = suggestionsChatId.value || savedAnalysis.value?.chatId || ''
+  if (chatId) consumedSuggestionChatId.value = chatId
+  resetSuggestionCache()
+  load()
 }
 
 onMounted(() => {
@@ -480,12 +509,15 @@ onMounted(() => {
   offAnalysis = onWS('mobileAnalysis', onAnalysis)
   offSuggestions = onWS('mobileAlertSuggestions', (payload) => {
     if (!payload || payload.code !== props.code) return
-    if (payload.error) {
-      showToast(payload.error)
-      return
-    }
+    // 自动提取失败只写服务端日志；用户手动提取时仍会看到具体错误。
+    if (payload.error) return
+    // 新一轮分析进行中，旧分析迟到的提取结果不能覆盖缓存。
+    if (running.value) return
+    // 这份分析的建议已经确认过，迟到的自动提取结果不再缓存。
+    if (payload.chatId && payload.chatId === consumedSuggestionChatId.value) return
+    // 只缓存，不自动弹窗；用户点“从分析中提取提醒”时再打开确认面板。
     suggestions.value = payload.suggestions || []
-    if (suggestions.value.length) showSuggestions.value = true
+    suggestionsChatId.value = payload.chatId || ''
   })
 })
 
@@ -512,6 +544,7 @@ watch(
     pendingTrade.value = null
     showTrade.value = false
     showTradeHistory.value = false
+    resetSuggestionCache()
     loadTradeStrategy()
     loadTradeDraft()
     load()
@@ -690,6 +723,9 @@ watch(
               <van-button size="small" plain type="primary" :disabled="!canExtract" @click="extractAlerts">
                 从分析中提取提醒
               </van-button>
+              <span v-if="cachedSuggestionsReady()" class="muted small">
+                已提取 {{ suggestions.length }} 条，点击确认
+              </span>
             </div>
           </template>
         </div>
@@ -909,7 +945,7 @@ watch(
       :code="item.code || code"
       :name="item.name || ''"
       :suggestions="suggestions"
-      @saved="load"
+      @saved="onSuggestionsSaved"
     />
   </div>
 </template>

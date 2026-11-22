@@ -2,7 +2,9 @@ package mobilecore
 
 import (
 	"encoding/json"
+	"math"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -145,6 +147,19 @@ func tradeAt(at time.Time, id, side string, shares int64, price string) tradeInp
 	return tradeInput{Code: "sh600000", RequestID: id, Side: side, Quantity: shares, Price: price, Fee: "4", At: at}
 }
 
+func requireFollowedCost(t *testing.T, result tradeResult) {
+	t.Helper()
+	var followed data.FollowedStock
+	if err := db.Dao.Where("stock_code = ?", "sh600000").First(&followed).Error; err != nil {
+		t.Fatal(err)
+	}
+	want, err := strconv.ParseFloat(result.NetCost, 64)
+	if err != nil || followed.Volume != result.Quantity || math.Abs(followed.CostPrice-want) > 1e-9 {
+		t.Fatalf("followed cost = %.4f / %d 股, want netCost %s / %d 股",
+			followed.CostPrice, followed.Volume, result.NetCost, result.Quantity)
+	}
+}
+
 func TestTradeLedgerReplay(t *testing.T) {
 	setupTradeTestDB(t)
 	at := baselineTrade(t)
@@ -153,23 +168,63 @@ func TestTradeLedgerReplay(t *testing.T) {
 	if err != nil || first.Quantity != 60 || first.AverageCost != "10.0000" || first.NetCost != "8.7333" {
 		t.Fatalf("sell: %+v %v", first, err)
 	}
+	requireFollowedCost(t, first)
 	buy := tradeAt(at.Add(3*time.Minute), "buy", "buy", 40, "9")
 	second, err := recordTrade(buy)
 	if err != nil || second.Quantity != 100 || second.AverageCost != "9.6400" || second.NetCost != "8.8800" {
 		t.Fatalf("buy: %+v %v", second, err)
 	}
+	requireFollowedCost(t, second)
 	replacement := tradeAt(at.Add(2*time.Minute), "", "buy", 20, "8")
 	corrected, err := correctTrade(tradeCorrection{Code: buy.Code, RequestID: "correct", TargetID: second.ID, Replacement: &replacement})
 	if err != nil || corrected.Quantity != 80 || corrected.AverageCost != "9.5500" || corrected.NetCost != "8.6000" {
 		t.Fatalf("correction: %+v %v", corrected, err)
 	}
+	requireFollowedCost(t, corrected)
 	closed, err := recordTrade(tradeAt(at.Add(4*time.Minute), "close", "sell", 80, "9"))
 	if err != nil || closed.Quantity != 0 || closed.AverageCost != "0.0000" || closed.NetCost != "0.0000" {
 		t.Fatalf("close: %+v %v", closed, err)
 	}
+	requireFollowedCost(t, closed)
 	reopen, err := recordTrade(tradeAt(at.Add(5*time.Minute), "reopen", "buy", 10, "8"))
 	if err != nil || reopen.Quantity != 10 || reopen.AverageCost != "8.4000" || reopen.NetCost != "8.4000" {
 		t.Fatalf("reopen: %+v %v", reopen, err)
+	}
+	requireFollowedCost(t, reopen)
+}
+
+func TestTradeLossSaleRaisesFollowedCost(t *testing.T) {
+	setupTradeTestDB(t)
+	at := baselineTrade(t)
+	result, err := recordTrade(tradeAt(at.Add(time.Minute), "loss-sell", "sell", 40, "5"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.AverageCost != "10.0000" || result.NetCost != "13.4000" {
+		t.Fatalf("loss sale = %+v", result)
+	}
+	requireFollowedCost(t, result)
+}
+
+func TestBackfillFollowedNetCosts(t *testing.T) {
+	setupTradeTestDB(t)
+	position := tradePosition{Code: "sh600000", Quantity: 60, NetInvested: 8_040_000, Revision: 3}
+	if err := db.Dao.Create(&position).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Dao.Model(&data.FollowedStock{}).Where("stock_code = ?", "sh600000").
+		Update("cost_price", 10.0).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := backfillFollowedNetCosts(); err != nil {
+		t.Fatal(err)
+	}
+	var followed data.FollowedStock
+	if err := db.Dao.Where("stock_code = ?", "sh600000").First(&followed).Error; err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(followed.CostPrice-13.4) > 1e-9 || followed.Volume != 60 {
+		t.Fatalf("backfilled followed cost = %.4f / %d", followed.CostPrice, followed.Volume)
 	}
 }
 

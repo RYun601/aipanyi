@@ -39,7 +39,7 @@ func migrateAlertModes() error {
 	})
 }
 
-func configureAlertMode(tx *gorm.DB, a *priceAlert, in alertDTO) error {
+func configureAlertMode(tx *gorm.DB, a *priceAlert, in alertDTO, quote alerts.QuoteSnapshot) error {
 	if a.Mode == "" && a.Source != "ai" {
 		a.Mode = "price"
 	}
@@ -56,25 +56,33 @@ func configureAlertMode(tx *gorm.DB, a *priceAlert, in alertDTO) error {
 		if math.IsNaN(a.MinVolumeRatio) || math.IsInf(a.MinVolumeRatio, 0) || math.IsNaN(a.MinBookBias) || math.IsInf(a.MinBookBias, 0) {
 			return errAlertConditions
 		}
-		if in.UsePosition {
+		// 分析时若还没有期初持仓账本，携带的版本号是 0：这条建议没有可绑定
+		// 的版本，按不依赖持仓的规则保存，而不是挡回让用户先去核对期初持仓。
+		emptyBasis := in.PositionRevision != nil && *in.PositionRevision <= 0
+		if in.UsePosition && !emptyBasis {
 			position, err := readTradePosition(tx, a.StockCode)
 			if err != nil {
 				return err
 			}
 			if position.Revision == 0 {
-				return errTradeBaseline
+				// 旧分析绑定的期初账本已经不存在（例如重装/重置后），没有可校验的
+				// 版本，按不依赖持仓保存；手动规则明确要求绑定持仓时仍要求先建账本。
+				if in.PositionRevision == nil {
+					return errTradeBaseline
+				}
+			} else {
+				if in.PositionRevision != nil && *in.PositionRevision != position.Revision {
+					return errAlertStalePosition
+				}
+				a.PositionRevision = &position.Revision
 			}
-			if in.PositionRevision != nil && *in.PositionRevision != position.Revision {
-				return errAlertStalePosition
-			}
-			a.PositionRevision = &position.Revision
 		}
 		a.NeedsReview = a.Phase == "close" || !a.strategyRule(time.Minute).Valid()
 		if a.Phase == "close" {
 			a.Enabled = false
 		}
 		if a.Enabled {
-			return canEnableStrategy(tx, *a)
+			return canEnableStrategy(tx, *a, quote)
 		}
 	default:
 		return errAlertMode
@@ -82,7 +90,7 @@ func configureAlertMode(tx *gorm.DB, a *priceAlert, in alertDTO) error {
 	return nil
 }
 
-func canEnableStrategy(tx *gorm.DB, a priceAlert) error {
+func canEnableStrategy(tx *gorm.DB, a priceAlert, quote alerts.QuoteSnapshot) error {
 	if a.Mode != "strategy" {
 		return nil
 	}
@@ -101,16 +109,20 @@ func canEnableStrategy(tx *gorm.DB, a priceAlert) error {
 			return errAlertReview
 		}
 	}
-	var quote data.StockInfo
-	err := tx.Where("code = ?", a.StockCode).Order("updated_at desc, id desc").First(&quote).Error
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return err
-	}
-	q := strategySnapshot(a.StockCode, quote, time.Now())
-	if q.At.IsZero() || q.VolumeRatio == nil || q.BookBias == nil || q.Price <= 0 {
+	if quote.At.IsZero() || quote.VolumeRatio == nil || quote.BookBias == nil || quote.Price <= 0 {
 		return errAlertCoverage
 	}
 	return nil
+}
+
+func fetchStrategyQuote(ctx context.Context, code string) alerts.QuoteSnapshot {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	quotes, err := getQuotesContext(ctx, []string{code})
+	if err != nil || ctx.Err() != nil {
+		return alerts.QuoteSnapshot{}
+	}
+	return strategySnapshot(code, quotes[code], time.Now())
 }
 
 func (a priceAlert) strategyRule(maxAge time.Duration) alerts.StrategyRule {

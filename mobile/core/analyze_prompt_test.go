@@ -70,6 +70,15 @@ func TestBuildAnalysisUserPromptUsesDefaultWhenQuestionEmpty(t *testing.T) {
 	}
 }
 
+func TestAnalysisPromptRequestsExplicitOrderBookConditions(t *testing.T) {
+	got := buildAnalysisUserPrompt(strings.NewReplacer(), "行情", "", false, "", "只分析突破条件", "")
+	for _, condition := range []string{"买盘占优", "卖盘占优", "最低量比", "五档挂单量偏向阈值"} {
+		if !strings.Contains(got, condition) {
+			t.Errorf("analysis prompt is missing %q", condition)
+		}
+	}
+}
+
 func TestListAnalysisPromptsIncludesSavedTemplates(t *testing.T) {
 	dir := t.TempDir()
 	db.InitWithOptions(filepath.Join(dir, "prompt.db"), db.MobileOptions())

@@ -293,13 +293,7 @@ func getTradeStrategy(code string, now time.Time) (tradeStrategyDTO, bool, error
 type tradeQuoteSource func(context.Context, string, time.Time) alerts.QuoteSnapshot
 
 func fetchTradeQuote(ctx context.Context, code string, _ time.Time) alerts.QuoteSnapshot {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	quotes, err := getQuotesContext(ctx, []string{code})
-	if err != nil || ctx.Err() != nil {
-		return alerts.QuoteSnapshot{}
-	}
-	return strategySnapshot(code, quotes[code], time.Now())
+	return fetchStrategyQuote(ctx, code)
 }
 
 func refreshTradeStrategy(ctx context.Context, code string, now time.Time, fetch tradeQuoteSource) (tradeStrategyDTO, error) {

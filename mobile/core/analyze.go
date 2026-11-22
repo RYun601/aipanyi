@@ -179,7 +179,12 @@ func (a *mobileApp) runAnalysis(ctx context.Context, runID, code, name string, a
 			})
 			return
 		}
-		basis = &position.Revision
+		// 只有已经建立期初持仓的账本才有可绑定的版本号。没有账本时
+		// Revision 为 0，若把 0 当成版本绑定，保存建议会报“请先核对并
+		// 保存期初持仓”；这种建议应当保存为不依赖持仓的规则。
+		if position.Revision > 0 {
+			basis = &position.Revision
+		}
 	}
 	portfolioWriteMu.Unlock()
 	price := quickPrice(code, follow.Price)
@@ -266,8 +271,9 @@ func (a *mobileApp) runAnalysis(ctx context.Context, runID, code, name string, a
 		return
 	}
 	assignSuggestionBasis(suggestions, basis)
+	// chatId 让前端能判断这份建议是否仍对应当前这份分析结果。
 	emitMobile("mobileAlertSuggestions", map[string]any{
-		"code": code, "name": name, "suggestions": suggestions,
+		"code": code, "name": name, "chatId": chatID, "suggestions": suggestions,
 	})
 }
 
@@ -363,6 +369,10 @@ func buildAnalysisUserPrompt(repl *strings.Replacer, dataBlock, kline string, wi
 	if !withPosition && custom != "" {
 		out += "\n\n注意：本次未提供用户的成本、持仓或账户信息；不要假设我的成本、仓位或现金。"
 	}
+	out += "\n\n若给出盘中价格提醒，请逐条说明触价后还需要满足的条件。" +
+		"策略需要盘口确认时，明确写出未来触价时应是买盘占优还是卖盘占优。" +
+		"有依据的最低量比、五档挂单量偏向阈值请写明数值，偏向阈值用百分比。" +
+		"只描述放量、缩量或站稳时，保持原条件，不据此推定盘口方向；没有依据的数值留空。"
 	if strings.TrimSpace(kline) != "" {
 		out += "\n\n近 30 日 K 线：\n" + kline
 	}

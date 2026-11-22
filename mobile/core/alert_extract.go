@@ -82,8 +82,9 @@ func extractAlertsWithConfig(code, name, analysis string, currentPrice float64, 
 		"1. 只提取分析中明确给出的价格，不要自己推测。\n" +
 		"2. direction=above 表示价格涨到/突破该价；below 表示跌到/跌破该价。\n" +
 		"3. price 必须是数字，A 股保留两位小数。\n" +
-		"4. 保留收盘、放量、站稳等限定，收盘用 phase=close。只填写原文明示的量比、五档买卖盘方向（buy/sell）及偏向阈值（0 到 1）。缺失填 null 或空字符串。\n" +
-		"5. 没有明确价格时输出 {\"alerts\":[]}。"
+		"4. 保留收盘、放量、站稳等限定，收盘用 phase=close。只填写该条触发条件明确给出的最低量比和五档挂单量偏向阈值，偏向百分比转为 0 到 1 的小数，缺失填 null。\n" +
+		"5. 原文要求触价时买盘占优填 bookSide=buy，要求卖盘占优填 bookSide=sell。仅描述涨跌、放量、缩量、站稳或当前盘口时，bookSide 留空。\n" +
+		"6. 没有明确价格时输出 {\"alerts\":[]}。"
 
 	// 0 表示按模型预算解析，不能用 600 这类小额度：思考模型的 reasoning
 	// 会先耗尽额度，导致正文 JSON 为空。
@@ -118,6 +119,11 @@ func parseAlertSuggestions(content, code, name string, currentPrice float64) ([]
 }
 
 func assignSuggestionBasis(suggestions []alertSuggestionDTO, revision *int64) {
+	// 0 表示分析时还没有期初持仓账本，没有可绑定的持仓版本；
+	// 绑定 0 会让保存阶段要求用户先补期初持仓，错误地挡回提醒。
+	if revision == nil || *revision <= 0 {
+		return
+	}
 	for i := range suggestions {
 		suggestions[i].PositionRevision = revision
 	}

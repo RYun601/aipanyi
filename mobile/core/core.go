@@ -167,5 +167,8 @@ func migrateMobile() error {
 	if err := backfillAlertMarkets(); err != nil {
 		logger.SugaredLogger.Warnf("mobile: backfill alert markets failed: %v", err)
 	}
+	if err := backfillFollowedNetCosts(); err != nil {
+		logger.SugaredLogger.Warnf("mobile: backfill followed costs failed: %v", err)
+	}
 	return nil
 }

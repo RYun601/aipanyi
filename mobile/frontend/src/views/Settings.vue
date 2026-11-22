@@ -538,7 +538,7 @@ onMounted(load)
         </van-cell-group>
         <div style="margin-top: 8px">
           <van-cell-group inset>
-            <van-cell title="分析后自动提取提醒" center>
+            <van-cell title="分析后自动提取提醒" label="只做准备，不自动弹窗；点「从分析中提取提醒」确认" center>
               <template #right-icon>
                 <van-switch v-model="settings.autoExtractAlerts" size="22px" />
               </template>
