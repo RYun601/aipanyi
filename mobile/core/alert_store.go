@@ -1,6 +1,7 @@
 package mobilecore
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -10,6 +11,7 @@ import (
 
 	"aipanyi/backend/data"
 	"aipanyi/backend/db"
+	"aipanyi/mobile/alerts"
 	"gorm.io/gorm"
 )
 
@@ -99,12 +101,13 @@ func backfillAlertMarkets() error {
 }
 
 var (
-	portfolioWriteMu    sync.Mutex
-	errAlertInvalid     = errors.New("股票代码、提醒方向或价格无效")
-	errAlertNotFollowed = errors.New("请先关注该股票")
-	errAlertDuplicate   = errors.New("已存在相同的价格提醒")
-	errAlertLimit       = fmt.Errorf("最多同时启用 %d 条价格提醒", maxEnabledAlerts)
-	errAlertMissing     = errors.New("提醒规则不存在")
+	portfolioWriteMu      sync.Mutex
+	errAlertInvalid       = errors.New("股票代码、提醒方向或价格无效")
+	errAlertNotFollowed   = errors.New("请先关注该股票")
+	errAlertDuplicate     = errors.New("已存在相同的价格提醒")
+	errAlertLimit         = fmt.Errorf("最多同时启用 %d 条价格提醒", maxEnabledAlerts)
+	errAlertMissing       = errors.New("提醒规则不存在")
+	errAlertBatchRejected = errors.New("本批提醒未替换，旧提醒已保留")
 )
 
 func refreshAlertMonitor() {
@@ -123,7 +126,7 @@ func saveAlert(in alertDTO) (int64, error) {
 }
 
 func saveAlertSuggestions(items []alertDTO) []alertSaveResult {
-	results := writeAlerts(items)
+	results := writeAlerts(items, fetchAlertQuote)
 	for _, result := range results {
 		if result.Status == "saved" {
 			refreshAlertMonitor()
@@ -133,112 +136,186 @@ func saveAlertSuggestions(items []alertDTO) []alertSaveResult {
 	return results
 }
 
-func writeAlerts(items []alertDTO) []alertSaveResult {
-	results := make([]alertSaveResult, 0, len(items))
-	for index, item := range items {
-		item.ID = 0 // 批量添加不会修改已存在的规则。
-		alert, err := writeAlert(item)
-		result := alertSaveResult{Index: index, ID: int64(alert.ID), Status: "saved"}
-		if err != nil {
-			result.Message = err.Error()
-			switch err {
-			case errAlertInvalid, errAlertConditions, errAlertCoverage, errAlertMode, errAlertReview, errTradeBaseline, errAlertStalePosition:
-				result.Status = "invalid"
-			case errAlertNotFollowed:
-				result.Status = "not_followed"
-			case errAlertDuplicate:
-				result.Status = "duplicate"
-			case errAlertLimit:
-				result.Status = "limit"
-			default:
-				result.Status = "failed"
-				result.Message = "写入提醒失败，请重试"
+func writeAlerts(items []alertDTO, fetchQuote func(string) alerts.QuoteSnapshot) []alertSaveResult {
+	results := make([]alertSaveResult, len(items))
+	if len(items) == 0 {
+		return results
+	}
+	code := normalizeCode(items[0].Code)
+	for _, item := range items {
+		if code == "" || normalizeCode(item.Code) != code {
+			for i := range results {
+				results[i] = alertSaveResult{Index: i, Status: "invalid", Message: "每次只能替换同一只股票的提醒"}
+			}
+			return results
+		}
+	}
+
+	var quote alerts.QuoteSnapshot
+	for _, item := range items {
+		if wantsStrategyQuote(item) {
+			quote = fetchQuote(code)
+			break
+		}
+	}
+	portfolioWriteMu.Lock()
+	defer portfolioWriteMu.Unlock()
+	err := db.Dao.Transaction(func(tx *gorm.DB) error {
+		// 旧规则先在事务内腾出配额，同价位也能重新保存。触发历史独立保留。
+		if err := tx.Where("stock_code = ?", code).Delete(&priceAlert{}).Error; err != nil {
+			return err
+		}
+		rejected := false
+		for index, item := range items {
+			item.ID = 0
+			alert, err := writeAlertTx(tx, item, quote)
+			if err == errAlertCoverage {
+				item.Enabled = false
+				alert, err = writeAlertTx(tx, item, quote)
+				if err == nil {
+					results[index] = alertSaveResult{Index: index, ID: int64(alert.ID), Status: "saved", Message: "行情暂不完整，已停用保存"}
+					continue
+				}
+			}
+			results[index] = suggestionSaveResult(index, alert, err)
+			rejected = rejected || (err != nil && err != errAlertDuplicate)
+		}
+		if rejected {
+			return errAlertBatchRejected
+		}
+		return nil
+	})
+	if err != nil {
+		for i, result := range results {
+			switch result.Status {
+			case "", "saved", "duplicate":
+				results[i] = alertSaveResult{Index: i, Status: "rolled_back", Message: errAlertBatchRejected.Error()}
 			}
 		}
-		results = append(results, result)
 	}
 	return results
 }
 
+func suggestionSaveResult(index int, alert priceAlert, err error) alertSaveResult {
+	result := alertSaveResult{Index: index, ID: int64(alert.ID), Status: "saved"}
+	if err == nil {
+		return result
+	}
+	result.Message = err.Error()
+	switch err {
+	case errAlertDuplicate:
+		result.Status = "duplicate"
+		return result
+	case errAlertInvalid, errAlertConditions, errAlertCoverage, errAlertMode, errAlertReview, errTradeBaseline, errAlertStalePosition:
+		result.Status = "invalid"
+	case errAlertNotFollowed:
+		result.Status = "not_followed"
+	case errAlertLimit:
+		result.Status = "limit"
+	default:
+		result.Status = "failed"
+		result.Message = "写入提醒失败，请重试"
+	}
+	result.ID = 0
+	return result
+}
+
+func wantsStrategyQuote(in alertDTO) bool {
+	return in.Enabled && in.Mode == "strategy" && in.Phase != "close"
+}
+
+func fetchAlertQuote(code string) alerts.QuoteSnapshot {
+	return fetchStrategyQuote(context.Background(), code)
+}
+
 func writeAlert(in alertDTO) (a priceAlert, err error) {
+	var quote alerts.QuoteSnapshot
+	if wantsStrategyQuote(in) {
+		quote = fetchAlertQuote(normalizeCode(in.Code))
+	}
+	portfolioWriteMu.Lock()
+	defer portfolioWriteMu.Unlock()
+	err = db.Dao.Transaction(func(tx *gorm.DB) error {
+		a, err = writeAlertTx(tx, in, quote)
+		return err
+	})
+	if err != nil && err != errAlertDuplicate {
+		a.ID = 0
+	}
+	return
+}
+
+func writeAlertTx(tx *gorm.DB, in alertDTO, quote alerts.QuoteSnapshot) (a priceAlert, err error) {
 	norm := normalizeCode(in.Code)
 	direction := strings.ToLower(strings.TrimSpace(in.Direction))
 	if norm == "" || (direction != "above" && direction != "below") ||
 		in.Price <= 0 || math.IsNaN(in.Price) || math.IsInf(in.Price, 0) {
 		return a, errAlertInvalid
 	}
-	portfolioWriteMu.Lock()
-	defer portfolioWriteMu.Unlock()
-	err = db.Dao.Transaction(func(tx *gorm.DB) error {
-		var followed data.FollowedStock
-		if err := tx.Where("stock_code = ?", norm).First(&followed).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return errAlertNotFollowed
-			}
-			return err
+	var followed data.FollowedStock
+	if err := tx.Where("stock_code = ?", norm).First(&followed).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return a, errAlertNotFollowed
 		}
-		created := in.ID == 0
-		var existing priceAlert
-		if !created {
-			if err := tx.First(&existing, in.ID).Error; err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return errAlertMissing
-				}
-				return err
-			}
-		}
-		a = priceAlert{
-			StockCode: norm, StockName: followed.Name, Market: marketOf(norm),
-			Direction: direction, Price: in.Price, Note: strings.TrimSpace(in.Note),
-			Source: "manual", Enabled: in.Enabled, LastState: "unknown", Mode: in.Mode, Phase: in.Phase,
-			MinVolumeRatio: in.MinVolumeRatio, BookSide: in.BookSide, MinBookBias: in.MinBookBias,
-			InitialNotify: created && in.Enabled && (in.Mode == "price" || in.Mode == ""),
-		}
-		if a.StockName == "" {
-			a.StockName = norm
-		}
-		if strings.TrimSpace(in.Source) == "ai" {
-			a.Source = "ai"
-		}
-		if note := []rune(a.Note); len(note) > 100 {
-			a.Note = string(note[:100])
-		}
-		if err := configureAlertMode(tx, &a, in); err != nil {
-			return err
-		}
-		if created || a.Enabled {
-			dup, err := duplicateAlert(tx, a, existing.ID, !created)
-			if err != nil {
-				return err
-			}
-			if dup.ID != 0 {
-				a = dup
-				return errAlertDuplicate
-			}
-		}
-		if a.Enabled && !existing.Enabled {
-			if err := checkAlertLimit(tx); err != nil {
-				return err
-			}
-		}
-		if created {
-			return tx.Create(&a).Error
-		}
-		a.ID = existing.ID
-		return tx.Model(&existing).Updates(map[string]any{
-			"stock_code": a.StockCode, "stock_name": a.StockName, "market": a.Market,
-			"direction": a.Direction, "price": a.Price, "note": a.Note,
-			"source": a.Source, "enabled": a.Enabled, "last_state": a.LastState,
-			"mode": a.Mode, "phase": a.Phase, "min_volume_ratio": a.MinVolumeRatio,
-			"book_side": a.BookSide, "min_book_bias": a.MinBookBias, "needs_review": a.NeedsReview,
-			"strategy_state": "", "initial_notify": false, "revision": existing.Revision + 1,
-			"position_revision": a.PositionRevision,
-		}).Error
-	})
-	if err != nil && err != errAlertDuplicate {
-		a.ID = 0
+		return a, err
 	}
-	return
+	created := in.ID == 0
+	var existing priceAlert
+	if !created {
+		if err := tx.First(&existing, in.ID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return a, errAlertMissing
+			}
+			return a, err
+		}
+	}
+	a = priceAlert{
+		StockCode: norm, StockName: followed.Name, Market: marketOf(norm),
+		Direction: direction, Price: in.Price, Note: strings.TrimSpace(in.Note),
+		Source: "manual", Enabled: in.Enabled, LastState: "unknown", Mode: in.Mode, Phase: in.Phase,
+		MinVolumeRatio: in.MinVolumeRatio, BookSide: in.BookSide, MinBookBias: in.MinBookBias,
+		InitialNotify: created && in.Enabled && (in.Mode == "price" || in.Mode == ""),
+	}
+	if a.StockName == "" {
+		a.StockName = norm
+	}
+	if strings.TrimSpace(in.Source) == "ai" {
+		a.Source = "ai"
+	}
+	if note := []rune(a.Note); len(note) > 100 {
+		a.Note = string(note[:100])
+	}
+	if err := configureAlertMode(tx, &a, in, quote); err != nil {
+		return a, err
+	}
+	if created || a.Enabled {
+		dup, err := duplicateAlert(tx, a, existing.ID, !created)
+		if err != nil {
+			return a, err
+		}
+		if dup.ID != 0 {
+			return dup, errAlertDuplicate
+		}
+	}
+	if a.Enabled && !existing.Enabled {
+		if err := checkAlertLimit(tx); err != nil {
+			return a, err
+		}
+	}
+	if created {
+		err := tx.Create(&a).Error
+		return a, err
+	}
+	a.ID = existing.ID
+	return a, tx.Model(&existing).Updates(map[string]any{
+		"stock_code": a.StockCode, "stock_name": a.StockName, "market": a.Market,
+		"direction": a.Direction, "price": a.Price, "note": a.Note,
+		"source": a.Source, "enabled": a.Enabled, "last_state": a.LastState,
+		"mode": a.Mode, "phase": a.Phase, "min_volume_ratio": a.MinVolumeRatio,
+		"book_side": a.BookSide, "min_book_bias": a.MinBookBias, "needs_review": a.NeedsReview,
+		"strategy_state": "", "initial_notify": false, "revision": existing.Revision + 1,
+		"position_revision": a.PositionRevision,
+	}).Error
 }
 
 func duplicateAlert(tx *gorm.DB, a priceAlert, exclude uint, onlyEnabled bool) (priceAlert, error) {
@@ -295,6 +372,22 @@ func writeAlertEnabled(id int64, enabled bool) error {
 	if id <= 0 {
 		return errAlertMissing
 	}
+	var quote alerts.QuoteSnapshot
+	var quoteCode string
+	if enabled {
+		// 在事务之外获取行情，避免网络请求占用 SQLite 写锁。
+		var current priceAlert
+		if err := db.Dao.First(&current, id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errAlertMissing
+			}
+			return err
+		}
+		if current.Mode == "strategy" && current.Phase == "intraday" && !current.NeedsReview {
+			quoteCode = current.StockCode
+			quote = fetchAlertQuote(quoteCode)
+		}
+	}
 	portfolioWriteMu.Lock()
 	defer portfolioWriteMu.Unlock()
 	return db.Dao.Transaction(func(tx *gorm.DB) error {
@@ -309,7 +402,10 @@ func writeAlertEnabled(id int64, enabled bool) error {
 			return nil
 		}
 		if enabled {
-			if err := canEnableStrategy(tx, a); err != nil {
+			if a.StockCode != quoteCode {
+				quote = alerts.QuoteSnapshot{}
+			}
+			if err := canEnableStrategy(tx, a, quote); err != nil {
 				return err
 			}
 			dup, err := duplicateAlert(tx, a, a.ID, true)

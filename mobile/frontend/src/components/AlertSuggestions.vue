@@ -13,24 +13,42 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:show', 'saved'])
 
-const state = reactive({ items: [], saving: false })
+const state = reactive({ items: [], saving: false, notice: '' })
+
+function canEnableSuggestion(item) {
+  const price = Number(item.price)
+  const ratio = Number(item.minVolumeRatio)
+  const percent = Number(item.bookPercent)
+  return item.mode === 'strategy' && item.phase === 'intraday' &&
+    Number.isFinite(price) && price > 0 &&
+    Number.isFinite(ratio) && ratio > 0 &&
+    (item.bookSide === 'buy' || item.bookSide === 'sell') &&
+    percent > 0 && percent <= 100
+}
 
 watch(
   () => props.show,
   (v) => {
     if (!v) return
-    state.items = (props.suggestions || []).map((s) => ({
-      ...s,
-      selected: !!s.valid,
-      price: String(s.price ?? ''),
-      note: s.note || '',
-      mode: s.mode || 'strategy',
-      phase: s.phase || 'intraday',
-      minVolumeRatio: s.minVolumeRatio ? String(s.minVolumeRatio) : '',
-      bookPercent: s.minBookBias ? String(s.minBookBias * 100) : '',
-      bookSide: s.bookSide || '',
-      enabled: true
-    }))
+    state.notice = ''
+    state.items = (props.suggestions || []).map((s) => {
+      const basisRevision = Number(s.positionRevision)
+      const item = {
+        ...s,
+        selected: !!s.valid,
+        price: String(s.price ?? ''),
+        note: s.note || '',
+        mode: s.mode || 'strategy',
+        phase: s.phase || 'intraday',
+        minVolumeRatio: s.minVolumeRatio ? String(s.minVolumeRatio) : '',
+        bookPercent: s.minBookBias ? String(s.minBookBias * 100) : '',
+        bookSide: s.bookSide || '',
+        // 0 表示分析时还没有期初持仓账本，不能当作可绑定的持仓版本。
+        positionRevision: Number.isFinite(basisRevision) && basisRevision > 0 ? basisRevision : null
+      }
+      item.enabled = canEnableSuggestion(item)
+      return item
+    })
   }
 )
 
@@ -46,6 +64,7 @@ async function confirm() {
   }
   if (state.saving) return
   state.saving = true
+  state.notice = ''
   try {
     const results = await api.saveAlertSuggestions(selected.map((item) => ({
       code: props.code,
@@ -53,7 +72,7 @@ async function confirm() {
       direction: item.direction,
       price: Number(item.price) || 0,
       note: item.note,
-      enabled: item.mode === 'price' || item.enabled,
+      enabled: item.mode === 'price' || (item.enabled && canEnableSuggestion(item)),
       mode: item.mode,
       phase: item.phase,
       minVolumeRatio: Number(item.minVolumeRatio) || 0,
@@ -64,12 +83,16 @@ async function confirm() {
       source: 'ai'
     })))
     let saved = 0
+    let savedPaused = 0
     let resolved = 0
     for (const result of results) {
       const item = selected[result.index]
       item.done = result.status === 'saved' || result.status === 'duplicate'
-      item.result = result.status === 'saved' ? '已添加' : result.message
-      if (result.status === 'saved') saved++
+      item.result = result.message || (result.status === 'saved' ? '已添加' : '')
+      if (result.status === 'saved') {
+        saved++
+        if (result.message) savedPaused++
+      }
       if (item.done) {
         item.selected = false
         resolved++
@@ -77,8 +100,12 @@ async function confirm() {
     }
     if (resolved) emit('saved')
     if (resolved === selected.length) {
-      showToast(saved ? '已添加 ' + saved + ' 条提醒' : '所选提醒已存在')
+      const summary = saved ? '已替换为 ' + saved + ' 条提醒' : '所选提醒已存在'
+      showToast(savedPaused ? summary + '，' + savedPaused + ' 条因行情不足暂未启用' : summary)
       close()
+    } else {
+      // 失败原因已经逐条显示在对应条目上；这里只给汇总，避免 toast 盖住正在修改的表单。
+      state.notice = selected.filter((item) => !item.done).length + ' 条提醒未保存，请按上方提示修改后重试'
     }
   } catch (e) {
     emit('saved')
@@ -94,7 +121,7 @@ async function confirm() {
     <div class="sheet">
       <div class="sheet-title">AI 建议的提醒</div>
       <div class="muted" style="margin-bottom: 12px">
-        确认每条提醒的方式与条件。收盘规则会保存为待复核。
+        确认添加后，所选提醒会替换这只股票的全部旧提醒，包括手动创建的提醒。收盘规则会保存为待复核。
       </div>
 
       <div v-if="!state.items.length" class="muted" style="padding: 12px 0">
@@ -123,7 +150,14 @@ async function confirm() {
         <fieldset v-if="item.valid && item.selected && !item.done" :disabled="state.saving" class="strategy-fields">
           <AlertStrategyFields :form="item" />
           <div v-if="item.mode === 'strategy' && item.positionRevision != null" class="muted">依据分析时的持仓版本</div>
-          <van-checkbox v-if="item.mode === 'strategy' && item.phase === 'intraday'" v-model="item.enabled" :disabled="state.saving">立即启用</van-checkbox>
+          <template v-if="item.mode === 'strategy' && item.phase === 'intraday'">
+            <van-checkbox
+              :model-value="item.enabled && canEnableSuggestion(item)"
+              :disabled="state.saving || !canEnableSuggestion(item)"
+              @update:model-value="item.enabled = $event"
+            >立即启用</van-checkbox>
+            <div v-if="!canEnableSuggestion(item)" class="muted">补齐条件后可启用，也可先保存为待复核。</div>
+          </template>
         </fieldset>
         <div v-if="item.valid" class="suggestion-note">
           <div class="muted suggestion-note-label">备注</div>
@@ -137,6 +171,8 @@ async function confirm() {
           />
         </div>
       </div>
+
+      <div v-if="state.notice" class="save-notice">{{ state.notice }}</div>
 
       <div class="row" style="margin-top: 12px">
         <van-button plain block round :disabled="state.saving" @click="close">取消</van-button>
@@ -154,5 +190,10 @@ async function confirm() {
 .suggestion-note-label {
   margin-bottom: 4px;
   font-size: 12px;
+}
+.save-notice {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #ee0a24;
 }
 </style>

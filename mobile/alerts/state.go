@@ -157,7 +157,12 @@ func ParseSuggestions(content, code, name string, currentPrice float64) ([]Sugge
 		}
 		sug.MinVolumeRatio, _ = ToFloat(raw.MinVolumeRatio)
 		sug.MinBookBias, _ = ToFloat(raw.MinBookBias)
-		sug.BookSide = raw.BookSide
+		switch strings.ToLower(strings.TrimSpace(raw.BookSide)) {
+		case "buy", "买盘占优":
+			sug.BookSide = "buy"
+		case "sell", "卖盘占优":
+			sug.BookSide = "sell"
+		}
 		rule := StrategyRule{Direction: dir, Price: sug.Price, MinVolumeRatio: sug.MinVolumeRatio,
 			BookSide: sug.BookSide, MinBookBias: sug.MinBookBias}
 		if sug.Valid && sug.Phase == "intraday" && !rule.Valid() {

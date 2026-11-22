@@ -483,13 +483,33 @@ func readTradePosition(tx *gorm.DB, code string) (tradePosition, error) {
 }
 
 func writeFollowedPosition(tx *gorm.DB, p tradePosition) error {
-	average := float64(proportionalTradeMoney(p.BookValue, 1, p.Quantity)) / float64(tradeScale)
+	// 自选/分析里展示的“成本”按资金回收口径：期初成本 + 买入净支出 - 卖出净回款，
+	// 再除以剩余股数。卖出后它会随已实现盈亏变化，与“剩余持仓均价”（账面均价）
+	// 分开保留在今日策略里。
+	netCost := float64(proportionalTradeMoney(p.NetInvested, 1, p.Quantity)) / float64(tradeScale)
 	result := tx.Model(&data.FollowedStock{}).Where("stock_code = ?", p.Code).
-		Updates(map[string]any{"volume": p.Quantity, "cost_price": average})
+		Updates(map[string]any{"volume": p.Quantity, "cost_price": netCost})
 	if result.Error == nil && result.RowsAffected == 0 {
 		return errAlertNotFollowed
 	}
 	return result.Error
+}
+
+// backfillFollowedNetCosts 把升级前按账面均价写入的自选成本改为资金回收口径，
+// 已有账本的股票在下次启动时即可看到卖出后的真实持仓成本。
+func backfillFollowedNetCosts() error {
+	var positions []tradePosition
+	if err := db.Dao.Find(&positions).Error; err != nil {
+		return err
+	}
+	for _, position := range positions {
+		netCost := float64(proportionalTradeMoney(position.NetInvested, 1, position.Quantity)) / float64(tradeScale)
+		if err := db.Dao.Model(&data.FollowedStock{}).Where("stock_code = ?", position.Code).
+			Updates(map[string]any{"volume": position.Quantity, "cost_price": netCost}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func invalidatePositionAlerts(tx *gorm.DB, position tradePosition) error {

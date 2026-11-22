@@ -110,6 +110,33 @@ func TestParseSuggestions(t *testing.T) {
 	}
 }
 
+func TestParseSuggestionsBookSide(t *testing.T) {
+	got, err := ParseSuggestions(`{"alerts":[
+		{"direction":"above","price":42,"bookSide":" 买盘占优 ","minVolumeRatio":1.5,"minBookBias":0.15},
+		{"direction":"below","price":42,"bookSide":" SELL "},
+		{"direction":"above","price":43,"note":"放量站稳"},
+		{"direction":"above","price":44,"bookSide":"双向","note":"放量站稳"}
+	]}`, "sh600000", "测试", 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"buy", "sell", "", ""}
+	if len(got) != len(want) {
+		t.Fatalf("got %d suggestions, want %d", len(got), len(want))
+	}
+	for i, side := range want {
+		if got[i].BookSide != side {
+			t.Errorf("suggestion %d bookSide = %q, want %q", i, got[i].BookSide, side)
+		}
+	}
+	if got[0].MinVolumeRatio != 1.5 || got[0].MinBookBias != 0.15 || got[0].Reason != "" {
+		t.Errorf("explicit conditions were not accepted: %+v", got[0])
+	}
+	if got[1].MinVolumeRatio != 0 || got[1].MinBookBias != 0 || got[1].Reason == "" {
+		t.Errorf("direction alone should still require numeric conditions: %+v", got[1])
+	}
+}
+
 func TestParseSuggestionsEmpty(t *testing.T) {
 	out, err := ParseSuggestions(`{"alerts":[]}`, "sh600519", "贵州茅台", 100)
 	if err != nil {
